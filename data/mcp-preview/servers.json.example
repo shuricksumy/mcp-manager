@@ -3,8 +3,6 @@
     "music-assistant": {
       "command": "uvx",
       "args": [
-        "--with",
-        "mcp<2.0.0",
         "--from",
         "git+https://github.com/shuricksumy/MCP-MusicAssistant@v1",
         "music-assistant-mcp"
@@ -20,8 +18,6 @@
     "frigate": {
       "command": "uvx",
       "args": [
-        "--with",
-        "mcp<2.0.0",
         "--from",
         "git+https://github.com/jakekeeys/frigate-mcp",
         "frigate-mcp"
@@ -37,8 +33,6 @@
     "qdrant": {
       "command": "uvx",
       "args": [
-        "--with",
-        "mcp<2.0.0",
         "mcp-server-qdrant"
       ],
       "env": {

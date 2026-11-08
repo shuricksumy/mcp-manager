@@ -3,8 +3,8 @@
     "music-assistant": {
       "command": "uvx",
       "args": [
-        "--with", "mcp<2.0.0",
-        "--from", "git+https://github.com/shuricksumy/MCP-MusicAssistant@v1",
+        "--from",
+        "git+https://github.com/shuricksumy/MCP-MusicAssistant@v1",
         "music-assistant-mcp"
       ],
       "env": {
@@ -18,45 +18,72 @@
     "frigate": {
       "command": "uvx",
       "args": [
-        "--with", "mcp<2.0.0",
-        "--from", "git+https://github.com/jakekeeys/frigate-mcp",
+        "--from",
+        "git+https://github.com/jakekeeys/frigate-mcp",
         "frigate-mcp"
       ],
       "env": {
         "FRIGATE_URL": "http://192.168.1.60:5000"
       },
-      "supervise": { "maxRss": "500M", "hardRss": "1G" }
+      "supervise": {
+        "maxRss": "500M",
+        "hardRss": "1G"
+      }
     },
     "qdrant": {
       "command": "uvx",
-      "args": ["--with", "mcp<2.0.0", "mcp-server-qdrant"],
+      "args": [
+        "mcp-server-qdrant"
+      ],
       "env": {
         "QDRANT_URL": "http://qdrant:6333",
         "COLLECTION_NAME": "recipes"
       },
-      "supervise": { "maxRss": "1G", "hardRss": "2G", "idleStop": "2h" }
+      "supervise": {
+        "maxRss": "1G",
+        "hardRss": "2G",
+        "idleStop": "2h"
+      }
     },
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data/recipe-archive/recipes"]
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/data/recipe-archive/recipes"
+      ]
     },
     "finance-fs": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data/finance"]
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/data/finance"
+      ]
     },
     "fetch": {
       "command": "uvx",
-      "args": ["--with", "mcp<2.0.0", "mcp-server-fetch"],
-      "supervise": { "maxAge": "24h" }
+      "args": [
+        "mcp-server-fetch"
+      ],
+      "supervise": {
+        "maxAge": "24h"
+      }
     },
     "mcp-time": {
       "command": "npx",
-      "args": ["-y", "@theo.foobar/mcp-time"],
+      "args": [
+        "-y",
+        "@theo.foobar/mcp-time"
+      ],
       "supervise": false
     },
     "searxng": {
       "command": "npx",
-      "args": ["-y", "mcp-searxng"],
+      "args": [
+        "-y",
+        "mcp-searxng"
+      ],
       "env": {
         "SEARXNG_URL": "http://searxng:8080"
       }
@@ -64,7 +91,9 @@
     "disabled-example": {
       "enabled": false,
       "command": "uvx",
-      "args": ["some-mcp-server"]
+      "args": [
+        "some-mcp-server"
+      ]
     }
   }
 }

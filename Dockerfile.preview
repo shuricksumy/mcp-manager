@@ -1,4 +1,5 @@
-# "Next" image: always the newest mcp-proxy, ready for mcp >= 2.
+# "preview" image (:preview): always the newest mcp-proxy, used to try the next
+# mcp SDK major before the default image moves to it (mcp 2 today, mcp 3 later).
 #
 # The stable image (Dockerfile) pins everything. This image tracks the latest
 # releases instead and lets you force a newer `mcp` SDK than mcp-proxy

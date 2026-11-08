@@ -1,0 +1,71 @@
+name: sdk-probe
+# Weekly check: does the newest mcp-proxy work with the next mcp SDK major yet?
+# Builds Dockerfile.preview with MCP_SPEC=$PROBE_SPEC and runs the smoke test.
+# A failure is expected until mcp-proxy supports that major and does NOT fail
+# the run. The first success opens an issue, so you know when :latest can move.
+#
+# Template for every SDK major: today it probes mcp 2; once :latest runs on
+# mcp 2, change PROBE_SPEC/PROBE_MAJOR to mcp 3.
+on:
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROBE_SPEC: "mcp>=2"
+  PROBE_MAJOR: "2"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # open the "mcp N works" issue
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - id: build
+        continue-on-error: true
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile.preview
+          build-args: MCP_SPEC=${{ env.PROBE_SPEC }}
+          platforms: linux/amd64
+          load: true
+          no-cache: true
+          tags: mcp-manager:sdk-probe
+      - id: smoke
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        run: scripts/smoke-test.sh mcp-manager:sdk-probe
+      - name: Report
+        run: |
+          if [ "$BUILD" = success ] && [ "$SMOKE" = success ]; then
+            versions="$(docker run --rm --entrypoint cat mcp-manager:sdk-probe /etc/mcp-proxy.versions)"
+            echo "### mcp ${PROBE_MAJOR} works: ${versions}" >> "$GITHUB_STEP_SUMMARY"
+            title="mcp-proxy now works with mcp ${PROBE_MAJOR}.x"
+            if [ -z "$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[].number')" ]; then
+              gh issue create --title "$title" --body "The weekly sdk-probe built Dockerfile.preview with \`MCP_SPEC=${PROBE_SPEC}\` and the smoke test passed: \`${versions}\`.
+
+          Next steps:
+          1. Copy \`Dockerfile\` to \`Dockerfile.legacy\` (keeps the mcp $((PROBE_MAJOR - 1)) pins) and publish it as \`:legacy\` in release.yml and ci.yml.
+          2. Move \`Dockerfile\` (\`MCP_PROXY_VERSION\`, \`MCP_VERSION\`) to mcp ${PROBE_MAJOR}, so \`:latest\` runs on it, and adjust the mcp major rule in renovate.json.
+          3. Set PROBE_SPEC/PROBE_MAJOR in sdk-probe.yml to the following major.
+
+          Run: ${RUN_URL}"
+            fi
+          else
+            echo "### mcp ${PROBE_MAJOR} not supported yet (build: ${BUILD}, smoke test: ${SMOKE:-skipped})" >> "$GITHUB_STEP_SUMMARY"
+          fi
+        env:
+          BUILD: ${{ steps.build.outcome }}
+          SMOKE: ${{ steps.smoke.outcome }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

@@ -1,10 +1,10 @@
 services:
-  mcp-proxy:
+  mcp-manager:
     # Prebuilt image from GHCR (`docker compose pull`). `docker compose build`
     # builds it locally from this repo instead.
     image: ghcr.io/shuricksumy/mcp-manager:${MCP_PROXY_IMAGE_TAG:-latest}
     build: .
-    container_name: ${MCP_PROXY_CONTAINER_NAME:-mcp-proxy}
+    container_name: ${MCP_PROXY_CONTAINER_NAME:-mcp-manager}
     restart: unless-stopped
     ports:
       - "${MCP_PROXY_PUBLISHED_PORT:-8005}:${MCP_PROXY_PORT:-8000}"
