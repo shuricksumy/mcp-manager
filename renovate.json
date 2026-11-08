@@ -37,6 +37,14 @@
   ],
   "packageRules": [
     {
+      "description": "Automerge: every patch and minor update (Docker images, GitHub Actions, mcp-proxy/mcp) merges itself once the required CI checks pass - both images built, smoke test, mcp-supervise and mcp-manager end-to-end tests. Majors wait for a review.",
+      "matchUpdateTypes": [
+        "patch",
+        "minor"
+      ],
+      "automerge": true
+    },
+    {
       "description": "mcp-proxy and the mcp SDK move together, so the pinned pair always satisfies mcp-proxy's own mcp requirement. CI (build + smoke test) gates the merge.",
       "matchDatasources": [
         "pypi"
@@ -67,15 +75,25 @@
       "enabled": false
     },
     {
-      "description": "uv only installs mcp-proxy at build time; CI catches a broken build",
+      "description": "Python is locked to the 3.12 line: no minor/major upgrades (base image), because uvx servers run on the image's Python and a new minor can break them (e.g. 3.15 had no fastembed for mcp-server-qdrant). Patch and digest refreshes of 3.12 (security fixes) still come through and merge themselves. Change Python deliberately by editing the Dockerfile.",
+      "matchDatasources": [
+        "docker"
+      ],
       "matchPackageNames": [
-        "ghcr.io/astral-sh/uv"
+        "python"
       ],
       "matchUpdateTypes": [
-        "patch",
-        "minor"
+        "minor",
+        "major"
       ],
-      "automerge": true
+      "enabled": false
+    },
+    {
+      "description": "Let new mcp-proxy / mcp releases settle for 3 days before they are proposed (mcp-proxy has shipped several fix releases within a day).",
+      "matchDatasources": [
+        "pypi"
+      ],
+      "minimumReleaseAge": "3 days"
     }
   ]
 }

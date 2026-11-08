@@ -99,7 +99,7 @@ def wait_for(pred, what, timeout=60):
 
 
 def wait_restarts(n, timeout=60):
-    wait_for(lambda: logs().count(": restarted: new pid") >= n, f"{n} restart(s)", timeout)
+    wait_for(lambda: logs().count("mcp-supervise[fake]: restarted: new pid") >= n, f"{n} restart(s)", timeout)
 
 
 def check(label, cond):
@@ -110,7 +110,17 @@ def check(label, cond):
 
 cfg = tempfile.mkdtemp()
 with open(os.path.join(cfg, "servers.json"), "w") as f:
-    json.dump({"mcpServers": {"fake": {
+    json.dump({"mcpServers": {"hang": {
+        "command": "python3", "args": ["-c", "import time; time.sleep(3600)"],
+        "supervise": {"startTimeout": "4s", "checkInterval": "1s"},
+    }, "broken": {
+        "command": "python3", "args": ["-c", "import sys; print('broken on purpose', file=sys.stderr); sys.exit(1)"],
+        "supervise": {"checkInterval": "1s"},
+    }, "flaky": {
+        "command": "python3", "args": ["/tests/fake_mcp_server.py"],
+        "env": {"FAKE_FAIL_FIRST": "2", "FAKE_COUNTER": "/tmp/flaky-count"},
+        "supervise": {"checkInterval": "1s"},
+    }, "fake": {
         "command": "python3", "args": ["/tests/fake_mcp_server.py"],
         "supervise": {"maxRss": "120M", "hardRss": "400M", "maxAge": "20s", "checkInterval": "1s"},
     }, "sleepy": {
@@ -203,7 +213,22 @@ try:
     s2 = pid("sleepy")
     check(f"woken by a request: pid {s1} -> {s2}", s2 != s1 and control("sleepy", "status")["state"] == "running")
 
-    # 8. the proxy never restarted
+    # 8. servers that fail to start never take mcp-proxy (or the others) down
+    for srv in ("broken", "hang", "flaky"):
+        wait_for(lambda: up(srv), f"proxy route for {srv}")
+        post({"jsonrpc": "2.0", "method": "notifications/initialized"}, server=srv)
+    st = control("broken", "status")
+    check(f"broken server is 'failed' ({st.get('failure')}), proxy and others up",
+          st["state"] == "failed" and pid() > 0)
+    value, err = tool("pid", server="broken")
+    check(f"request to the failed server gets a clear error: {err[:70] if err else value}", value is None and "failed to start" in err)
+    st = control("hang", "status")
+    check(f"hanging server marked failed after its start timeout ({st.get('failure')})", st["state"] == "failed" and "initialize" in (st.get("failure") or ""))
+    wait_for(lambda: control("flaky", "status")["state"] == "running", "flaky to recover", 60)
+    value, err = tool("pid", server="flaky")
+    check(f"flaky server recovered after 2 failed starts and answers (pid {value})", err is None and int(value) > 0)
+
+    # 9. the proxy never restarted
     starts = logs().count("entrypoint: exec")
     restarted = subprocess.run(["docker", "inspect", "-f", "{{.RestartCount}}", name], capture_output=True, text=True).stdout.strip()
     check(f"proxy never restarted (exec lines {starts}, restart count {restarted}), {time.time() - t0:.0f}s", starts == 1 and restarted == "0")

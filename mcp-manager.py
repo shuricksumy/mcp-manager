@@ -63,7 +63,7 @@ def _load_supervise():
 sup = _load_supervise()
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-SECRET_RE = re.compile(r"TOKEN|SECRET|PASSW|API_?KEY|(^|_)KEY$|CREDENTIAL|AUTH|COOKIE|PRIVATE", re.I)
+SECRET_RE = re.compile(r"TOKEN|SECRET|PASSW|API_?KEY|(^|_)KEY$|CREDENTIAL|AUTHORIZATION|COOKIE|PRIVATE", re.I)
 SUPERVISE_KEYS = ("maxRss", "hardRss", "maxAge", "idleStop", "logInterval")
 HISTORY_POINTS = 720  # 1 h at the 5 s sampling interval
 SAMPLE_INTERVAL = 5.0
@@ -781,19 +781,29 @@ PAGE = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MCP Manager</title>
+<script>try { const t = localStorage.getItem("mcp-theme"); if (t === "dark" || t === "light") document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <style>
 :root {
   --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #667085; --line: #e3e6eb;
   --accent: #2f6fde; --accent-text: #ffffff; --ok: #1a8a4a; --warn: #b26b00; --bad: #c4302b;
   --idle: #6b7280; --chip: #eef1f5; --code: #f1f3f6; --shadow: 0 1px 2px rgba(16,24,40,.06);
 }
+:root { color-scheme: light; }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #0f1218; --panel: #171b23; --text: #e6e9ef; --muted: #9aa3b2; --line: #2a303b;
     --accent: #5b8ff0; --accent-text: #0b1220; --ok: #3fbf74; --warn: #e3a33a; --bad: #f06a62;
     --idle: #8b93a1; --chip: #222833; --code: #1e232d; --shadow: none;
   }
 }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1218; --panel: #171b23; --text: #e6e9ef; --muted: #9aa3b2; --line: #2a303b;
+  --accent: #5b8ff0; --accent-text: #0b1220; --ok: #3fbf74; --warn: #e3a33a; --bad: #f06a62;
+  --idle: #8b93a1; --chip: #222833; --code: #1e232d; --shadow: none;
+}
+#btnTheme { min-width: 38px; padding: 6px 10px; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text);
   font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -826,7 +836,7 @@ button:disabled { opacity: .45; cursor: default; }
 .badge { margin-left: auto; font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 99px; background: var(--chip); white-space: nowrap; }
 .badge::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; background: currentColor; vertical-align: 1px; }
 .s-running { color: var(--ok); } .s-sleeping, .s-stopped, .s-disabled { color: var(--idle); }
-.s-restarting, .s-starting, .s-not-loaded { color: var(--warn); } .s-crashed, .s-unreachable, .s-invalid { color: var(--bad); }
+.s-restarting, .s-starting, .s-not-loaded { color: var(--warn); } .s-crashed, .s-unreachable, .s-invalid, .s-failed { color: var(--bad); }
 .s-unsupervised { color: var(--muted); }
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .stat { min-width: 0; } .stat span { display: block; color: var(--muted); font-size: 11.5px; }
@@ -881,6 +891,7 @@ pre.log { margin: 0; background: var(--code); border-radius: 8px; padding: 10px;
   <h1>MCP Manager</h1>
   <div class="meta" id="meta">loading…</div>
   <div class="actions">
+    <button id="btnTheme" title="Theme" aria-label="Theme"></button>
     <button id="btnImport">Import JSON</button>
     <button id="btnProxy">Restart proxy</button>
     <button class="primary" id="btnAdd">+ Add server</button>
@@ -1009,7 +1020,7 @@ function render() {
     const lim = srv.supervise_effective || {};
     const url = `http://${host}:${port}/servers/${encodeURIComponent(srv.name)}/mcp`;
     const ev = (r.events || []).slice(-1)[0];
-    const running = ["running", "restarting", "starting", "crashed"].includes(st);  // crashed = auto-restart pending
+    const running = ["running", "restarting", "starting", "crashed", "failed"].includes(st);  // crashed/failed = retrying
     return `<article class="card" data-name="${esc(srv.name)}">
       <div class="head"><h2 title="${esc(srv.name)}">${esc(srv.name)}</h2><span class="badge s-${esc(st.replace(" ", "-"))}">${esc(st)}</span></div>
       ${srv.description ? `<div class="desc">${esc(srv.description)}</div>` : ""}
@@ -1022,6 +1033,7 @@ function render() {
         <div class="stat"><span>Restarts</span><b>${r.restarts ?? "–"}${r.crashes ? ` <span class="s-crashed">(${r.crashes} crash)</span>` : ""}</b></div>
         <div class="stat"><span>Last used</span><b>${r.last_request ? ago(r.last_request) : "never"}</b></div>
       </div>
+      ${st === "failed" ? `<div class="err">Failed to start: ${esc(r.failure)}${r.retryIn != null ? ` · retry in ${age(r.retryIn)}` : ""} — see Logs. Other servers are not affected.</div>` : ""}
       <div class="event">${ev ? `${ago(ev.time)}: ${esc(ev.event)}` : "&nbsp;"}${r.note ? " · " + esc(r.note) : ""}</div>` :
       `<p class="hint">${st === "not loaded" ? "Saved, but mcp-proxy has not loaded it yet: restart the proxy." : st === "disabled" ? "Disabled: not started." : st === "unsupervised" ? "Running without supervision: no stats or controls." : ""}</p>`}
       <div class="cmd" title="${esc([srv.command, ...(srv.args || [])].join(" "))}">${esc([srv.command, ...(srv.args || [])].join(" "))}</div>
@@ -1145,6 +1157,17 @@ async function openLog(name) {
 }
 $("#btnLogClose").onclick = () => $("#dlgLog").close();
 $("#dlgLog").addEventListener("close", () => clearInterval(logTimer));
+
+const THEMES = {auto: ["◐", "Theme: follows the system (click for dark)"], dark: ["☾", "Theme: dark (click for light)"], light: ["☀", "Theme: light (click for system)"]};
+function theme() { return document.documentElement.dataset.theme || "auto"; }
+function showTheme() { const [icon, label] = THEMES[theme()]; const b = $("#btnTheme"); b.textContent = icon; b.title = label; b.setAttribute("aria-label", label); }
+$("#btnTheme").onclick = () => {
+  const next = {auto: "dark", dark: "light", light: "auto"}[theme()];
+  if (next === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = next;
+  try { if (next === "auto") localStorage.removeItem("mcp-theme"); else localStorage.setItem("mcp-theme", next); } catch (e) {}
+  showTheme();
+};
+showTheme();
 
 refresh(); setInterval(() => { if (!document.hidden) refresh(); }, 3000);
 </script>

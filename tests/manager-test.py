@@ -119,7 +119,7 @@ def logs():
 cfg = tempfile.mkdtemp()
 with open(os.path.join(cfg, "servers.json"), "w") as f:
     json.dump({"mcpServers": {
-        "fake": {**FAKE, "env": {"PLAIN": "one", "API_TOKEN": "s3cret"}},
+        "fake": {**FAKE, "env": {"PLAIN": "one", "AUTH_USERNAME": "me", "API_TOKEN": "s3cret"}},
         "off": {**FAKE, "enabled": False},
     }}, f)
 
@@ -145,7 +145,8 @@ try:
         return json.loads(subprocess.run(["docker", "exec", name, "cat", path], capture_output=True, text=True, check=True).stdout)
     public = read_in_container("/mcp/servers.d/fake.json")
     secret = read_in_container("/mcp/servers.d/fake.secret.json")
-    check("imported into servers.d/fake.json (+ .secret.json)", public["env"] == {"PLAIN": "one"} and secret["env"] == {"API_TOKEN": "s3cret"})
+    check("imported into servers.d/fake.json (+ .secret.json); AUTH_USERNAME is not a secret",
+          public["env"] == {"PLAIN": "one", "AUTH_USERNAME": "me"} and secret["env"] == {"API_TOKEN": "s3cret"})
     check("secret file is mode 600", oct(os.stat(os.path.join(d, "fake.secret.json")).st_mode & 0o777) == "0o600")
     view = api("GET", "/api/servers/fake")
     check("API masks secrets", {"key": "API_TOKEN", "value": "", "secret": True, "hasValue": True} in view["env"] and "s3cret" not in json.dumps(state()))
