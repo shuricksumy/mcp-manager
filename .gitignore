@@ -1,0 +1,11 @@
+# Secrets / local config
+.env
+.env.*
+!.env.example
+!homelab/.env.homelab.example
+data/mcp/servers.json
+data/finance/
+*.pem
+*.key
+*secret*
+*token*

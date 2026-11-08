@@ -1,0 +1,21 @@
+services:
+  mcp-proxy:
+    build: .
+    pull_policy: build
+    container_name: ${MCP_PROXY_CONTAINER_NAME:-mcp-proxy}
+    restart: unless-stopped
+    ports:
+      - "${MCP_PROXY_PUBLISHED_PORT:-8005}:${MCP_PROXY_PORT:-8000}"
+    environment:
+      MCP_PROXY_HOST: ${MCP_PROXY_HOST:-0.0.0.0}
+      MCP_PROXY_PORT: ${MCP_PROXY_PORT:-8000}
+      MCP_PROXY_TRANSPORT: ${MCP_PROXY_TRANSPORT:-streamablehttp}
+      MCP_PROXY_CONFIG: ${MCP_PROXY_CONFIG:-/mcp/servers.json}
+      MCP_PROXY_ALLOWED_HOSTS: ${MCP_PROXY_ALLOWED_HOSTS:-}
+      MCP_PROXY_ALLOW_ORIGINS: ${MCP_PROXY_ALLOW_ORIGINS-*}
+      MCP_PROXY_PASS_ENV: ${MCP_PROXY_PASS_ENV:-false}
+      MCP_PROXY_LOG_LEVEL: ${MCP_PROXY_LOG_LEVEL:-}
+      MCP_PROXY_DEBUG: ${MCP_PROXY_DEBUG:-false}
+      MCP_PROXY_EXTRA_ARGS: ${MCP_PROXY_EXTRA_ARGS:-}
+    volumes:
+      - ${MCP_CONFIG_DIR:-./data/mcp}:/mcp
