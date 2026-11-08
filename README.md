@@ -23,7 +23,7 @@ It's built on [`mcp-proxy`](https://github.com/sparfenyuk/mcp-proxy), which does
   - `hardRss`: restart immediately.
   - `maxAge`: restart after running this long, to clear slow leaks.
   - `idleStop`: stop an unused server and start it again on its next request.
-- **Crash isolation:** a crashing server is restarted on its own. Plain mcp-proxy stops *all* servers when one exits.
+- **Failure isolation:** a server that crashes, or fails or hangs at startup, never takes the others down. It's marked **failed** and retried with backoff. Plain mcp-proxy stops *all* servers when one exits, and waits forever for one that hangs at startup.
 - **Two images:** a pinned **stable** one, and a weekly **`next`** one that tracks the newest mcp-proxy and is ready for the mcp 2 SDK.
 - **Maintained automatically:** Renovate keeps everything pinned and up to date. Updates merge themselves only after the full end-to-end test suite passes.
 
@@ -107,7 +107,7 @@ The field names vary between clients, for example `"type": "http"` or `"transpor
   - a **sleeping** server (idle-stopped) starts again on its next request.
 - **Logs** show the last 200 lines from the server and its supervisor, refreshing live.
 - **Restart proxy** restarts mcp-proxy with all servers. It's only needed after **adding** a server (see the table below).
-- The page works on phones too.
+- The page works on phones too. The **◐ / ☾ / ☀** button in the header switches the theme between system, dark and light, and the choice is remembered in your browser.
 
 <br clear="right">
 
@@ -167,7 +167,8 @@ mcp-proxy starts each stdio server **once** and shares it between all clients, s
 | Max age / `maxAge`, e.g. `24h` | `MCP_SUPERVISE_MAX_AGE` | Running longer than this → restart once idle (clears slow leaks) |
 | Idle stop / `idleStop`, e.g. `2h` | `MCP_SUPERVISE_IDLE_STOP` | Unused for this long → stop (frees all its RAM). The next request starts it again; only that first call is slower |
 | `logInterval`, e.g. `15m` | `MCP_SUPERVISE_LOG_INTERVAL` | Writes its RAM use to the log this often (default `1h`) |
-| *(always on)* | | Crash → restart only that server, with backoff. After more than 5 crashes in 10 min it gives up: mcp-proxy exits and Docker restarts the container |
+| `startTimeout`, e.g. `300s` | `MCP_SUPERVISE_START_TIMEOUT` | First start: no answer within this (default `120s`) → **failed**, retried with backoff |
+| *(always on)* | | Crash → restart only that server, with backoff. A server that fails at startup, or crashes more than 5 times in 10 min, is marked **failed**: its requests get an error pointing to its log, and it's retried every 2 s → 5 min until it comes up. mcp-proxy and the other servers keep running |
 
 **Choosing limits:** let it run for a day without limits and watch the RAM graphs. Set **Max RSS** to about 2–3× a server's normal value. Use **Hard RSS** as an emergency limit and `mem_limit` as a backstop for the whole container. For servers you rarely use, **Idle stop** saves the most RAM.
 
@@ -223,7 +224,7 @@ The full mcp-proxy command line is printed at startup (only flags, never env val
 
 - **HTTP 421 "Invalid Host header":** since 0.13.3, mcp-proxy only accepts loopback `Host` headers. Add every name clients use (LAN IP, DNS name, container name) to `MCP_PROXY_ALLOWED_HOSTS`; a wildcard port (`host:*`) is supported. `MCP_PROXY_ALLOW_ORIGINS` only covers the `Origin` header and doesn't fix this.
 - **A new server shows "not loaded":** it's saved but mcp-proxy hasn't loaded it yet. Click **Restart proxy** in the banner.
-- **A server never starts:** open its **Logs**. A server that fails *before* its first successful start makes mcp-proxy exit. The manager restarts mcp-proxy with backoff, so disable or fix that server.
+- **A server shows "failed":** open its **Logs** to see why (missing package, wrong arguments, bad env). It's retried automatically, and **Restart** retries it now. The other servers are unaffected. A first `uvx` start that downloads a lot (e.g. `mcp-server-qdrant` with its embedding model) can exceed the 120 s start timeout; it then recovers on a retry, or you can raise `startTimeout` for that server.
 - **`npm WARN EBADENGINE … required: { node: '>=24' }`** in a server's log: the image currently ships Debian's Node.js 20. Most servers still work. A server that really needs a newer Node won't start.
 - **First start is slow:** `uvx`/`npx` download each server on its first run. Mounting the uv and npm caches (see Quick start) makes later starts fast.
 - **docker.sock:** if a server needs `/var/run/docker.sock`, mounting it `:ro` **still effectively gives root on the host**, because read-only applies to the socket file, not to the Docker API. Mount it only for servers you trust.
@@ -232,7 +233,7 @@ The full mcp-proxy command line is printed at startup (only flags, never env val
 
 - **Tests**, run in CI on both images:
   - [scripts/smoke-test.sh](scripts/smoke-test.sh): MCP `initialize` with an allowed Host, and 421 for an unknown one.
-  - [tests/supervise-test.py](tests/supervise-test.py): 21 checks covering limits, crash, in-flight protection, control socket and idle-stop.
+  - [tests/supervise-test.py](tests/supervise-test.py): 25 checks covering limits, crash, in-flight protection, control socket, idle-stop, and servers that crash, hang or flake at startup.
   - [tests/manager-test.py](tests/manager-test.py): 25 checks covering auth, import and secrets, a live edit keeping the client session, stop/start, add + proxy restart, validation and persistence.
 - **Run locally:** `docker build -t mcp-manager:dev . && python3 tests/manager-test.py mcp-manager:dev`.
 - **Workflows:**
@@ -242,7 +243,8 @@ The full mcp-proxy command line is printed at startup (only flags, never env val
   - also CodeQL, zizmor, dependency-review, Renovate config validation and a monthly GHCR cleanup.
 - **`main` is protected:** changes go through PRs, and the required checks are both image builds (with all tests), shellcheck, CodeQL and dependency-review.
 - **Renovate** ([renovate.json](renovate.json), shared preset `shuricksumy/renovate-config`) owns version updates. **Patch and minor updates merge themselves once the required checks pass.** The exceptions:
-  - **Majors** and **Python minor bumps** (e.g. 3.12 → 3.15) wait for a review.
+  - **Majors** wait for a review.
+  - **Python is locked to 3.12:** minor and major Python upgrades are never proposed, because `uvx` servers run on the image's Python and a new minor can break them (3.15 broke `mcp-server-qdrant`). 3.12 patch and security refreshes still merge themselves.
   - **mcp-proxy and `mcp`** are bumped together, after a 3-day settling period.
   - **`mcp` 2.x** is skipped for the stable image.
 - **Dependabot** only opens security updates. Patch and minor security fixes merge themselves.

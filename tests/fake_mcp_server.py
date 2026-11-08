@@ -10,6 +10,18 @@ import sys
 import threading
 import time
 
+# FAKE_FAIL_FIRST=N with FAKE_COUNTER=<file>: exit(1) on the first N starts.
+if os.environ.get("FAKE_FAIL_FIRST"):
+    counter = os.environ["FAKE_COUNTER"]
+    try:
+        n = int(open(counter).read())
+    except (OSError, ValueError):
+        n = 0
+    open(counter, "w").write(str(n + 1))
+    if n < int(os.environ["FAKE_FAIL_FIRST"]):
+        sys.stderr.write(f"fake: failing start {n + 1} on purpose\n")
+        sys.exit(1)
+
 hog = []
 lock = threading.Lock()
 

@@ -16,7 +16,11 @@ and restarts the server when
   * its memory exceeds --hard-rss - immediately; in-flight requests get a
     JSON-RPC error instead of hanging;
   * it crashes - after a short backoff. More than --max-crashes crashes within
-    --crash-window: give up and exit, so mcp-proxy restarts as before.
+    --crash-window: it is marked "failed" and retried with a longer backoff.
+A server that crashes or hangs while starting (no answer within
+--start-timeout) never takes mcp-proxy down: the shim answers mcp-proxy's
+initialize itself, marks the server "failed" (requests get an error pointing
+to its log) and keeps retrying with backoff until it comes up.
 With --idle-stop it stops a server nobody used for that long ("sleeping") and
 starts it again on the next request.
 
@@ -165,6 +169,9 @@ class Supervisor:
         self.max_crashes = args.max_crashes
         self.crash_window = args.crash_window
         self.init_timeout = args.init_timeout
+        self.start_timeout = args.start_timeout
+        self.failure: str | None = None  # why the server is in the "failed" state
+        self.retry_at: float | None = None
         self.grace = args.grace
         self.control_dir = args.control_dir
         self.definition = args.definition
@@ -195,7 +202,7 @@ class Supervisor:
         self.ready = asyncio.Event()  # the current child accepts messages
         self.lock = asyncio.Lock()  # child swap and writes to the child
         self.restarting = False
-        self.paused: str | None = None  # None | "stopped" (manual) | "sleeping" (idle-stop)
+        self.paused: str | None = None  # None | "stopped" (manual) | "sleeping" (idle-stop) | "failed"
         self.crashes: collections.deque[float] = collections.deque()
         self.stopping = False
 
@@ -355,6 +362,9 @@ class Supervisor:
         rc = await child.wait()
         if child.pid in self.retired or self.stopping:
             return
+        if self.pending_init is not None and not self.pending_init[1].done():
+            self.pending_init[1].set_result({"error": f"server exited ({rc}) while starting"})
+            return  # restart() reports the failure
         asyncio.create_task(self.on_crash(rc))
 
     def from_child(self, line: bytes) -> None:
@@ -403,8 +413,20 @@ class Supervisor:
         while True:
             await self.ready.wait()
             if self.paused is not None:
+                for m in msgs:
+                    if kind(m) == "notification" and m.get("method") == "notifications/initialized":
+                        self.initialized_note = m
                 if not requests:
                     return  # notifications / stale responses for a stopped server
+                if self.paused == "failed":
+                    for m in requests:
+                        self.requests += 1
+                        if m.get("method") == "initialize" and self.init_request is None:
+                            self.init_request = m
+                            self.answer_initialize(m)
+                        else:
+                            self.error_to_proxy(m["id"], self.failed_message())
+                    return
                 if self.paused == "stopped":
                     for m in requests:
                         self.requests += 1
@@ -455,6 +477,77 @@ class Supervisor:
         parts.append("restart on crash")
         return ", ".join(parts)
 
+    def failed_message(self) -> str:
+        retry = ""
+        if self.retry_at is not None:
+            retry = f"; next retry in {max(0, self.retry_at - time.monotonic()):.0f}s"
+        return f"MCP server '{self.name}' failed to start ({self.failure}){retry}. See its log in mcp-manager or docker logs"
+
+    def answer_initialize(self, request: dict) -> None:
+        """Answer mcp-proxy's initialize ourselves, so a broken server does not stop the proxy.
+
+        Every capability is announced, so mcp-proxy registers all handlers and
+        forwards everything once the real server is up; until then requests
+        get an error.
+        """
+        params = request.get("params") or {}
+        self.inflight_in.pop(id_key(request.get("id")), None)
+        self.to_proxy({
+            "jsonrpc": "2.0",
+            "id": request.get("id"),
+            "result": {
+                "protocolVersion": params.get("protocolVersion", "2025-06-18"),
+                "capabilities": {"tools": {"listChanged": True}, "prompts": {"listChanged": True},
+                                 "resources": {"listChanged": True}, "logging": {}},
+                "serverInfo": {"name": f"{self.name} (failed to start)", "version": "0"},
+            },
+        })
+
+    async def enter_failed(self, reason: str) -> None:
+        """Mark the server failed and retry it with backoff until it starts."""
+        first = self.paused != "failed"
+        self.ready.clear()
+        try:
+            async with self.lock:
+                if self.child is not None and self.child.returncode is None:
+                    await self.stop_child(self.child)
+                self.child = None
+                # Answer mcp-proxy's pending initialize first: fail_inflight()
+                # would otherwise send it an error, and mcp-proxy would exit.
+                if self.init_request is not None and not self.initialized:
+                    self.answer_initialize(self.init_request)
+                self.fail_inflight(f"failed: {reason}")
+                self.initialized = True
+                self.paused = "failed"
+                self.failure = reason
+        finally:
+            self.ready.set()
+        if first:
+            self.event(f"failed: {reason}")
+            self.log(f"server failed ({reason}); other servers are not affected, retrying with backoff")
+            asyncio.create_task(self.retry_failed())
+
+    async def retry_failed(self) -> None:
+        delay = 2.0
+        while not self.stopping and self.paused == "failed":
+            self.retry_at = time.monotonic() + delay
+            await asyncio.sleep(delay)
+            if self.stopping or self.paused != "failed":
+                break
+            if await self.restart(f"retry after failure ({self.failure})"):
+                self.log("recovered")
+                self.failure = None
+                self.crashes.clear()
+                break
+            delay = min(delay * 2, 300.0)
+        self.retry_at = None
+
+    async def start_watchdog(self) -> None:
+        """First start: give up waiting for initialize after --start-timeout."""
+        await asyncio.sleep(self.start_timeout)
+        if not self.initialized and not self.stopping:
+            await self.enter_failed(f"no answer to initialize within {self.start_timeout:.0f}s")
+
     async def restart(self, reason: str, wake: bool = False) -> bool:
         """(Re)start the server and replay initialize. False if the new one fails."""
         self.restarting = True
@@ -496,6 +589,7 @@ class Supervisor:
                     if self.initialized_note is not None:
                         await self.write_child(json.dumps(self.initialized_note).encode() + b"\n")
                 self.paused = None
+                self.failure = None
                 if not wake and old is not None:
                     self.restarts += 1
                 self.event(reason)
@@ -532,9 +626,7 @@ class Supervisor:
 
     async def on_crash(self, rc: int | str | None) -> None:
         if not self.initialized:
-            # Never came up: behave exactly like an unsupervised server.
-            self.log(f"server exited ({rc}) before initialize completed; exiting")
-            self.shutdown_now(rc if isinstance(rc, int) and rc else 1)
+            await self.enter_failed(f"exited ({rc}) while starting")
             return
         while not self.stopping and self.paused is None:
             now = time.monotonic()
@@ -543,12 +635,7 @@ class Supervisor:
             while self.crashes and now - self.crashes[0] > self.crash_window:
                 self.crashes.popleft()
             if len(self.crashes) > self.max_crashes:
-                self.log(
-                    f"{len(self.crashes)} crashes within {fmt_age(self.crash_window)}; giving up "
-                    "(mcp-proxy will exit and the container restart policy takes over)"
-                )
-                self.fail_inflight("server keeps crashing")
-                self.shutdown_now(1)
+                await self.enter_failed(f"{len(self.crashes)} crashes within {fmt_age(self.crash_window)}")
                 return
             delay = min(30, 2 ** (len(self.crashes) - 1))
             self.log(f"server exited ({rc}); restarting in {delay}s")
@@ -556,6 +643,8 @@ class Supervisor:
             self.ready.clear()
             await asyncio.sleep(delay)
             if await self.restart(f"crash, exit {rc}"):
+                return
+            if self.paused is not None:
                 return
             rc = "start failed"
 
@@ -607,7 +696,9 @@ class Supervisor:
     def status(self) -> dict:
         child = self.child
         running = child is not None and child.returncode is None
-        if self.restarting:
+        if self.paused == "failed":
+            state = "failed"  # also while a retry is in progress
+        elif self.restarting:
             state = "restarting"
         elif self.paused:
             state = self.paused
@@ -638,6 +729,8 @@ class Supervisor:
             "idle": time.monotonic() - self.last_activity,
             "last_request": self.last_request_wall,
             "events": list(self.events),
+            "failure": self.failure,
+            "retryIn": max(0, self.retry_at - time.monotonic()) if self.retry_at is not None else None,
             "command": self.cmd,
         }
 
@@ -649,7 +742,7 @@ class Supervisor:
                 resp = self.status()
             elif cmd == "log":
                 resp = {"lines": list(self.stderr_tail)}
-            elif cmd in ("restart", "stop", "start") and not self.initialized:
+            elif cmd in ("restart", "stop", "start") and not self.initialized and self.paused != "failed":
                 resp = {"ok": False, "error": "server has not finished initializing yet"}
             elif cmd == "restart":
                 resp = {"ok": await self.restart("manual restart")}
@@ -702,6 +795,7 @@ class Supervisor:
         await self.spawn()
         self.ready.set()
         await self.serve_control()
+        asyncio.create_task(self.start_watchdog())
         proxy_task = asyncio.create_task(self.pump_proxy())
         monitor_task = asyncio.create_task(self.monitor())
         signal_task = asyncio.create_task(done.wait())
@@ -724,6 +818,7 @@ OPTIONS = {
     "checkInterval": ("--check-interval", parse_duration),
     "maxCrashes": ("--max-crashes", int),
     "logInterval": ("--log-interval", parse_duration),
+    "startTimeout": ("--start-timeout", parse_duration),
 }
 ENV = {
     "maxRss": "MCP_SUPERVISE_MAX_RSS",
@@ -733,6 +828,7 @@ ENV = {
     "checkInterval": "MCP_SUPERVISE_CHECK_INTERVAL",
     "maxCrashes": "MCP_SUPERVISE_MAX_CRASHES",
     "logInterval": "MCP_SUPERVISE_LOG_INTERVAL",
+    "startTimeout": "MCP_SUPERVISE_START_TIMEOUT",
 }
 
 
@@ -817,7 +913,9 @@ def main() -> int:
     p.add_argument("--log-interval", type=parse_duration, default=3600.0, help="periodic RSS log line")
     p.add_argument("--max-crashes", type=int, default=5)
     p.add_argument("--crash-window", type=parse_duration, default=600.0)
-    p.add_argument("--init-timeout", type=parse_duration, default=60.0)
+    p.add_argument("--init-timeout", type=parse_duration, default=60.0, help="initialize timeout on restarts")
+    p.add_argument("--start-timeout", type=parse_duration, default=120.0,
+                   help="first start: mark failed if initialize is not answered within this")
     p.add_argument("--grace", type=parse_duration, default=5.0, help="wait between stop signals")
     p.add_argument("--control-dir", help="directory for the control socket")
     p.add_argument("--definition", help="JSON file with command/args/env/supervise, reloaded on every restart")

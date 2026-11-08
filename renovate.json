@@ -75,7 +75,7 @@
       "enabled": false
     },
     {
-      "description": "A new Python minor (e.g. 3.12 -> 3.15) changes the runtime of every stdio server, beyond what CI exercises: review it by hand. Patch and digest updates of the same minor still merge themselves.",
+      "description": "Python is locked to the 3.12 line: no minor/major upgrades (base image), because uvx servers run on the image's Python and a new minor can break them (e.g. 3.15 had no fastembed for mcp-server-qdrant). Patch and digest refreshes of 3.12 (security fixes) still come through and merge themselves. Change Python deliberately by editing the Dockerfile.",
       "matchDatasources": [
         "docker"
       ],
@@ -86,7 +86,7 @@
         "minor",
         "major"
       ],
-      "automerge": false
+      "enabled": false
     },
     {
       "description": "Let new mcp-proxy / mcp releases settle for 3 days before they are proposed (mcp-proxy has shipped several fix releases within a day).",
