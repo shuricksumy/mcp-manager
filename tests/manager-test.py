@@ -141,8 +141,10 @@ try:
 
     # import: one file per server, secrets separate and masked
     d = os.path.join(cfg, "servers.d")
-    public = json.load(open(os.path.join(d, "fake.json")))
-    secret = json.load(open(os.path.join(d, "fake.secret.json")))
+    def read_in_container(path):  # the secret file is root-owned, mode 600: read it as root
+        return json.loads(subprocess.run(["docker", "exec", name, "cat", path], capture_output=True, text=True, check=True).stdout)
+    public = read_in_container("/mcp/servers.d/fake.json")
+    secret = read_in_container("/mcp/servers.d/fake.secret.json")
     check("imported into servers.d/fake.json (+ .secret.json)", public["env"] == {"PLAIN": "one"} and secret["env"] == {"API_TOKEN": "s3cret"})
     check("secret file is mode 600", oct(os.stat(os.path.join(d, "fake.secret.json")).st_mode & 0o777) == "0o600")
     view = api("GET", "/api/servers/fake")
