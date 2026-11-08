@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   ci: # the full CI on exactly the commit that is published
-    uses: ./.github/workflows/ci.yml
+    uses: $/.github/workflows/ci.yml # self-repository syntax (zizmor: self-repository)
 
   publish:
     name: publish (${{ matrix.variant }})
