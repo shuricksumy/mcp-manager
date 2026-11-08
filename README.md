@@ -156,6 +156,31 @@ The login is user `admin` with `MCP_MANAGER_PASSWORD`. If that is unset, a passw
 - **Allow the embedding site:** set `MCP_MANAGER_FRAME_ANCESTORS` to the address of the page that embeds it, exactly as your browser shows it, e.g. `http://192.168.1.10:8123`. By default no site may embed it, because a page with Stop/Delete buttons in someone else's frame invites clickjacking, so only list sites you trust. `*` allows any site.
 - **HTTPS:** if the embedding site uses `https://`, the admin page must be served over `https://` too, behind a reverse proxy. Browsers block `http://` frames inside `https://` pages.
 
+**One host, several addresses** (LAN IP, hostname, VPN IP). The browser checks the address of the page **around** the iframe (your dashboard), not the address used to reach the manager. So list every address you open the dashboard from:
+
+```yaml
+services:
+  mcp-manager:
+    image: ghcr.io/shuricksumy/mcp-manager:latest
+    ports:
+      - "8005:8000"   # MCP endpoints
+      - "8015:8001"   # admin page
+    environment:
+      MCP_MANAGER: "true"
+      MCP_MANAGER_PASSWORD: ${MCP_MANAGER_PASSWORD:?set it in .env}
+      # Admin page in an iframe: every address the EMBEDDING page (dashboard) is opened from.
+      # Space-separated; ":*" = any port on that host.
+      MCP_MANAGER_FRAME_ANCESTORS: "http://192.168.1.10:* http://homelab.lan:* http://10.8.0.1:*"
+      #                             LAN IP                 hostname             VPN IP
+      # MCP endpoints (port 8005): every address MCP CLIENTS use, plus the container name
+      # for clients in other containers. Comma-separated; without it you get HTTP 421.
+      MCP_PROXY_ALLOWED_HOSTS: "192.168.1.10:*,homelab.lan:*,10.8.0.1:*,mcp-manager:*"
+```
+
+- **One address everywhere:** the iframe's own `src` is a single fixed URL, and it has to be reachable from wherever you open the dashboard. If you open the dashboard over VPN but the `src` is a LAN IP the VPN can't reach, the frame stays empty. Use a hostname that resolves on both LAN and VPN (split DNS or a hosts entry), or reverse-proxy the manager under the dashboard's own address (e.g. `/mcp-manager/`) and set `MCP_MANAGER_FRAME_ANCESTORS: "'self'"`.
+- **No IP ranges:** `192.168.1.*` isn't allowed. The only wildcard is for subdomains (`http://*.home.lan`). `http:` on its own allows *any* HTTP site, which is simpler but removes the clickjacking protection.
+- **Login per address:** `http://192.168.1.10:8015` and `http://10.8.0.1:8015` are different sites to the browser, so each one asks for the `admin` password once.
+
 The MCP endpoints themselves (port 8005) have **no authentication**. That's how mcp-proxy works in server mode. Keep them on a trusted network, or put an authenticating reverse proxy in front.
 
 ## Memory and supervision
