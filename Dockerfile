@@ -7,7 +7,7 @@ ARG MCP_VERSION=1.30.0
 
 # git/curl/nodejs/npm are needed by the stdio servers launched via uvx / npx.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git curl ca-certificates nodejs npm \
+    && apt-get install -y --no-install-recommends git curl ca-certificates nodejs npm tini \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 /uv /uvx /bin/
@@ -25,7 +25,11 @@ RUN set -e; \
     cat /etc/mcp-proxy.versions
 
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY mcp-supervise.py /usr/local/bin/mcp-supervise
+COPY mcp-manager.py /usr/local/bin/mcp-manager
+RUN chmod +x /entrypoint.sh /usr/local/bin/mcp-supervise /usr/local/bin/mcp-manager
 
-EXPOSE 8000
-ENTRYPOINT ["/entrypoint.sh"]
+# 8000: mcp-proxy, 8001: mcp-manager admin page (MCP_MANAGER=true)
+EXPOSE 8000 8001
+# tini: reaps orphaned server processes and forwards stop signals.
+ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

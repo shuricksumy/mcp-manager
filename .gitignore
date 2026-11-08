@@ -11,3 +11,7 @@ data/finance/
 *.key
 *secret*
 *token*
+
+# Python bytecode
+__pycache__/
+*.pyc

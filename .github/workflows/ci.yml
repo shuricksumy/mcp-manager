@@ -38,9 +38,13 @@ jobs:
           platforms: linux/amd64
           load: true
           no-cache: true # "next" must always resolve the newest releases
-          tags: mcp-proxy-stack:ci
+          tags: mcp-manager:ci
       - name: Smoke test (initialize via allowed Host, 421 for unknown Host)
-        run: scripts/smoke-test.sh mcp-proxy-stack:ci
+        run: scripts/smoke-test.sh mcp-manager:ci
+      - name: mcp-supervise end-to-end (restart on memory/age/crash, stop/start, idle-stop)
+        run: python3 tests/supervise-test.py mcp-manager:ci
+      - name: mcp-manager end-to-end (admin API, per-server files, live edit, proxy restart)
+        run: python3 tests/manager-test.py mcp-manager:ci
 
   shellcheck:
     runs-on: ubuntu-latest
@@ -49,3 +53,4 @@ jobs:
         with:
           persist-credentials: false
       - run: shellcheck entrypoint.sh scripts/*.sh
+      - run: python3 -m py_compile mcp-supervise.py mcp-manager.py tests/*.py
