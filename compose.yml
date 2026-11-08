@@ -2,7 +2,7 @@ services:
   mcp-proxy:
     # Prebuilt image from GHCR (`docker compose pull`). `docker compose build`
     # builds it locally from this repo instead.
-    image: ghcr.io/shuricksumy/mcp-proxy-stack:${MCP_PROXY_IMAGE_TAG:-latest}
+    image: ghcr.io/shuricksumy/mcp-manager:${MCP_PROXY_IMAGE_TAG:-latest}
     build: .
     container_name: ${MCP_PROXY_CONTAINER_NAME:-mcp-proxy}
     restart: unless-stopped

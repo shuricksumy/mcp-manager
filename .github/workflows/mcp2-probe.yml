@@ -32,15 +32,15 @@ jobs:
           platforms: linux/amd64
           load: true
           no-cache: true
-          tags: mcp-proxy-stack:mcp2
+          tags: mcp-manager:mcp2
       - id: smoke
         if: steps.build.outcome == 'success'
         continue-on-error: true
-        run: scripts/smoke-test.sh mcp-proxy-stack:mcp2
+        run: scripts/smoke-test.sh mcp-manager:mcp2
       - name: Report
         run: |
           if [ "$BUILD" = success ] && [ "$SMOKE" = success ]; then
-            versions="$(docker run --rm --entrypoint cat mcp-proxy-stack:mcp2 /etc/mcp-proxy.versions)"
+            versions="$(docker run --rm --entrypoint cat mcp-manager:mcp2 /etc/mcp-proxy.versions)"
             echo "### mcp 2 works: ${versions}" >> "$GITHUB_STEP_SUMMARY"
             title="mcp-proxy now works with mcp 2.x"
             if [ -z "$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[].number')" ]; then

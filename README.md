@@ -1,6 +1,11 @@
-# mcp-proxy-stack
+# mcp-manager
 
-Docker setup for [`mcp-proxy`](https://pypi.org/project/mcp-proxy/) (sparfenyuk) 0.14.0. It runs several stdio MCP servers and exposes each one over streamable HTTP (and SSE) at `/servers/<name>/mcp`. All mcp-proxy options are set through environment variables in `compose.yml` / `.env`. An entrypoint script turns them into CLI flags, because mcp-proxy does not read its options from the environment.
+Run your stdio MCP servers in one Docker container and expose each one over HTTP (streamable HTTP and SSE) at `/servers/<name>/mcp`, using [`mcp-proxy`](https://pypi.org/project/mcp-proxy/) (sparfenyuk).
+
+- **Admin page:** add, edit, monitor and control each server. Definitions are stored one file per server, with secrets kept separate.
+- **Per-server supervision:** memory and age limits, crash restarts, stop/start and idle-stop, without dropping client sessions.
+- **Two images:** a pinned stable one and a `next` one that tracks the newest mcp-proxy (and is ready for mcp 2).
+- **Configuration through environment variables:** mcp-proxy itself doesn't read its options from the environment, so an entrypoint script turns them into command-line flags.
 
 ## Images
 
@@ -8,9 +13,9 @@ Both are built by CI and published to GHCR for `linux/amd64` and `linux/arm64`:
 
 | Tag | Dockerfile | What it is |
 |---|---|---|
-| `ghcr.io/shuricksumy/mcp-proxy-stack:latest` | [Dockerfile](Dockerfile) | **Stable.** mcp-proxy, `mcp`, uv and Python all pinned. Renovate bumps them through PRs that only merge when CI passes. |
-| `ghcr.io/shuricksumy/mcp-proxy-stack:<version>` (e.g. `0.14.0`) | [Dockerfile](Dockerfile) | Stable, kept per mcp-proxy version for pinning or rollback. |
-| `ghcr.io/shuricksumy/mcp-proxy-stack:next` | [Dockerfile.next](Dockerfile.next) | **Newest.** Latest mcp-proxy, uv and `python:3.12-slim`, rebuilt every week. Can force a newer `mcp` SDK (`MCP_SPEC`). Has its own compose file, `.env` and `servers.json`. |
+| `ghcr.io/shuricksumy/mcp-manager:latest` | [Dockerfile](Dockerfile) | **Stable.** mcp-proxy, `mcp`, uv and Python all pinned. Renovate bumps them through PRs that only merge when CI passes. |
+| `ghcr.io/shuricksumy/mcp-manager:<version>` (e.g. `0.14.0`) | [Dockerfile](Dockerfile) | Stable, kept per mcp-proxy version for pinning or rollback. |
+| `ghcr.io/shuricksumy/mcp-manager:next` | [Dockerfile.next](Dockerfile.next) | **Newest.** Latest mcp-proxy, uv and `python:3.12-slim`, rebuilt every week. Can force a newer `mcp` SDK (`MCP_SPEC`). Has its own compose file, `.env` and `servers.json`. |
 
 Both images run a smoke test while building: the build fails if mcp-proxy cannot import. A broken combination, such as forcing `mcp>=2` today, therefore never produces an image.
 

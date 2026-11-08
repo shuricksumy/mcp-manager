@@ -1,5 +1,5 @@
 name: release
-# Publishes ghcr.io/<owner>/mcp-proxy-stack:
+# Publishes ghcr.io/<owner>/mcp-manager:
 #   :latest, :<mcp-proxy version>  stable image (Dockerfile, pinned versions)
 #   :next                          newest mcp-proxy (Dockerfile.next), rebuilt weekly
 on:

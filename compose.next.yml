@@ -21,7 +21,7 @@ services:
         MCP_SPEC: ${MCP_SPEC:-}
         UV_VERSION: ${UV_VERSION:-latest}
         PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
-    image: ghcr.io/shuricksumy/mcp-proxy-stack:next
+    image: ghcr.io/shuricksumy/mcp-manager:next
     container_name: ${MCP_PROXY_CONTAINER_NAME:-mcp-proxy-next}
     restart: unless-stopped
     ports:
