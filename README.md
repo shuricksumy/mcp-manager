@@ -1,147 +1,248 @@
 # mcp-manager
 
-Run your stdio MCP servers in one Docker container and expose each one over HTTP (streamable HTTP and SSE) at `/servers/<name>/mcp`, using [`mcp-proxy`](https://pypi.org/project/mcp-proxy/) (sparfenyuk).
+[![release](https://github.com/shuricksumy/mcp-manager/actions/workflows/release.yml/badge.svg)](https://github.com/shuricksumy/mcp-manager/actions/workflows/release.yml)
+[![ci](https://github.com/shuricksumy/mcp-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/shuricksumy/mcp-manager/actions/workflows/ci.yml)
+[![image](https://img.shields.io/badge/ghcr.io-shuricksumy%2Fmcp--manager-blue?logo=docker)](https://github.com/shuricksumy/mcp-manager/pkgs/container/mcp-manager)
 
-- **Admin page:** add, edit, monitor and control each server. Definitions are stored one file per server, with secrets kept separate.
-- **Per-server supervision:** memory and age limits, crash restarts, stop/start and idle-stop, without dropping client sessions.
-- **Two images:** a pinned stable one and a `next` one that tracks the newest mcp-proxy (and is ready for mcp 2).
-- **Configuration through environment variables:** mcp-proxy itself doesn't read its options from the environment, so an entrypoint script turns them into command-line flags.
+Run your stdio MCP servers (`uvx …`, `npx …`) in one Docker container and expose each one over HTTP at `http://<host>:8005/servers/<name>/mcp`. Add, configure, monitor and control them from a web page.
 
-## Images
+It's built on [`mcp-proxy`](https://github.com/sparfenyuk/mcp-proxy), which does the stdio ⇄ HTTP bridging. On top of that, this project adds an admin page, per-server supervision, and images that are pinned, tested and updated automatically.
 
-Both are built by CI and published to GHCR for `linux/amd64` and `linux/arm64`:
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/overview-dark.png">
+  <img alt="mcp-manager admin page: one card per MCP server with state, RAM graph against limits, uptime, requests, restarts and controls" src="docs/overview.png">
+</picture>
 
-| Tag | Dockerfile | What it is |
-|---|---|---|
-| `ghcr.io/shuricksumy/mcp-manager:latest` | [Dockerfile](Dockerfile) | **Stable.** mcp-proxy, `mcp`, uv and Python all pinned. Renovate bumps them through PRs that only merge when CI passes. |
-| `ghcr.io/shuricksumy/mcp-manager:<version>` (e.g. `0.14.0`) | [Dockerfile](Dockerfile) | Stable, kept per mcp-proxy version for pinning or rollback. |
-| `ghcr.io/shuricksumy/mcp-manager:next` | [Dockerfile.next](Dockerfile.next) | **Newest.** Latest mcp-proxy, uv and `python:3.12-slim`, rebuilt every week. Can force a newer `mcp` SDK (`MCP_SPEC`). Has its own compose file, `.env` and `servers.json`. |
+## Features
 
-Both images run a smoke test while building: the build fails if mcp-proxy cannot import. A broken combination, such as forcing `mcp>=2` today, therefore never produces an image.
-
-**mcp 2.x:** mcp-proxy (0.14.0 on PyPI, and 0.15.0 on `main`) still requires `mcp<2`, because mcp 2.0 removed `request_ctx`, which mcp-proxy imports. The weekly [mcp2-probe](.github/workflows/mcp2-probe.yml) workflow builds `:next` with `MCP_SPEC=mcp>=2`. It opens an issue the first time that works.
+- **Admin page:** add, edit, import, enable/disable and delete servers. Each server is stored in **its own file**, and secret values are kept in a separate file that is never sent to the browser.
+- **Monitoring per server:** state, RAM with a 1-hour graph against its limits, uptime, requests and errors, restarts and crashes, the last event, and live logs. The page also shows the container's memory.
+- **Control per server:** Start / Stop / Restart, without dropping the sessions of clients using other servers, or even that one.
+- **Memory control:**
+  - `maxRss`: restart when idle and above the limit.
+  - `hardRss`: restart immediately.
+  - `maxAge`: restart after running this long, to clear slow leaks.
+  - `idleStop`: stop an unused server and start it again on its next request.
+- **Crash isolation:** a crashing server is restarted on its own. Plain mcp-proxy stops *all* servers when one exits.
+- **Two images:** a pinned **stable** one, and a weekly **`next`** one that tracks the newest mcp-proxy and is ready for the mcp 2 SDK.
+- **Maintained automatically:** Renovate keeps everything pinned and up to date. Updates merge themselves only after the full end-to-end test suite passes.
 
 ## Quick start
 
+```yaml
+# compose.yml
+services:
+  mcp-manager:
+    image: ghcr.io/shuricksumy/mcp-manager:latest
+    container_name: mcp-manager
+    restart: unless-stopped
+    ports:
+      - "8005:8000"     # MCP endpoints: http://<host>:8005/servers/<name>/mcp
+      - "8015:8001"     # admin page:    http://<host>:8015  (user: admin)
+    environment:
+      MCP_MANAGER: "true"
+      MCP_MANAGER_PASSWORD: ${MCP_MANAGER_PASSWORD:?set it in .env}
+      MCP_PROXY_PUBLISHED_PORT: "8005"                      # used for the endpoint links on the page
+      MCP_PROXY_ALLOWED_HOSTS: "192.168.1.10:*,mcp-manager:*"   # every host name clients use (see 421 below)
+      MCP_SUPERVISE_HARD_RSS: "2G"                          # default emergency limit per server
+    volumes:
+      - ./data/mcp:/mcp                    # servers.d/ (one file per server), manager.password
+      - ./cache/uv:/root/.cache/uv         # optional: faster uvx starts
+      - ./cache/npm:/root/.npm             # optional: faster npx starts
+      # - ./documents:/data/documents      # whatever your servers need to read
+    mem_limit: 4g                          # backstop for all servers together
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8001/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+```
+
 ```sh
-cp .env.example .env
-cp data/mcp/servers.json.example data/mcp/servers.json   # then edit
-docker compose pull && docker compose up -d     # or: docker compose up -d --build
-docker logs -f mcp-proxy
+echo 'MCP_MANAGER_PASSWORD=<choose-a-strong-password>' > .env
+docker compose up -d
 ```
 
-The `next` image runs side by side on port 8006, with its own config:
+Open `http://<host>:8015`, log in as `admin`, and add servers with **+ Add server**, or paste an `mcpServers` block with **Import JSON**. If `./data/mcp/servers.json` already exists, it is imported automatically on first start.
 
-```sh
-cp .env.next.example .env.next
-cp data/mcp-next/servers.json.example data/mcp-next/servers.json   # then edit
-docker compose -f compose.next.yml --env-file .env.next pull
-docker compose -f compose.next.yml --env-file .env.next up -d
+From a clone of this repo you can use [compose.yml](compose.yml) and [.env.example](.env.example) instead: `cp .env.example .env && docker compose up -d`.
+
+## Connecting clients
+
+Each server has its own endpoint, and the **copy** button on its card gives you the URL:
+
+| Transport | URL |
+|---|---|
+| Streamable HTTP | `http://<host>:8005/servers/<name>/mcp` |
+| SSE (older clients) | `http://<host>:8005/servers/<name>/sse` |
+
+For a client that takes an `mcpServers` config with URLs:
+
+```json
+{
+  "mcpServers": {
+    "fetch": { "type": "streamable-http", "url": "http://192.168.1.10:8005/servers/fetch/mcp" },
+    "time":  { "type": "streamable-http", "url": "http://192.168.1.10:8005/servers/time/mcp" }
+  }
+}
 ```
 
-To test a local image: `scripts/smoke-test.sh <image>`. It starts the image with one stdio server and expects a successful MCP `initialize` for an allowed Host, and HTTP 421 for an unknown one.
+The field names vary between clients, for example `"type": "http"` or `"transport"`. Clients that only speak stdio can connect through a bridge such as `npx mcp-remote <url>`.
 
-Endpoints: `http://<host>:8005/servers/<name>/mcp` (streamable HTTP) and `.../servers/<name>/sse`.
+## Admin page
 
-`servers.json` uses the `mcpServers` format: each entry has `command`, `args` (a list), an optional `env` (object) and an optional `enabled` (default `true`). mcp-proxy ignores any other keys, such as `timeout`, `type` or `transportType`. `env` values are literal. `${VAR}` is **not** expanded, so to keep secrets out of the file, set `MCP_PROXY_PASS_ENV=true` and pass them as container env vars.
+| Edit a server | Live logs |
+|---|---|
+| <img alt="Edit dialog: command, arguments, environment with secret values, supervision limits" src="docs/edit.png"> | <img alt="Log viewer: the last 200 lines of one server" src="docs/logs.png"> |
 
-## Admin page (mcp-manager)
+<img alt="Admin page on a phone" src="docs/mobile.png" width="300" align="right">
 
-![Admin page](docs/admin-page.png)
+- **Add / edit:**
+  - name, description, command, arguments (one per line), environment variables, and limits;
+  - **secret** variables are write-only: they're stored, never shown again, and an empty field keeps the stored value;
+  - **Enabled** off stops the server and keeps its definition.
+- **Import JSON:** paste an `mcpServers` block, for example from a server's README. Variables whose names look like `TOKEN`, `SECRET`, `PASSWORD`, `API_KEY`, `*_KEY` and similar become secrets.
+- **Start / Stop / Restart** act on that server only:
+  - a stopped server answers requests with an error;
+  - a **sleeping** server (idle-stopped) starts again on its next request.
+- **Logs** show the last 200 lines from the server and its supervisor, refreshing live.
+- **Restart proxy** restarts mcp-proxy with all servers. It's only needed after **adding** a server (see the table below).
+- The page works on phones too.
 
-With `MCP_MANAGER=true`, servers are managed from a web page instead of a hand-edited `servers.json`:
+<br clear="right">
 
-- **Add, edit, delete** servers: command, arguments, environment (with **secret** values) and limits. You can also **import** an `mcpServers` JSON block, e.g. from a server's README.
-- **Monitor** each server: state, RAM with a 1-hour graph against its limits, uptime, requests and errors, restarts and crashes, last event, and live **logs**.
-- **Control** each server: **Start / Stop / Restart**. A stopped server answers requests with an error, and an idle-stopped one ("sleeping") wakes on the next request.
-- The page also shows mcp-proxy's state and version and the container's memory use, and has a **Restart proxy** button.
+### Where servers are stored
 
-**Storage:** one file per server in `<MCP_CONFIG_DIR>/servers.d/` (on the host: `./data/mcp/servers.d/`):
+One file per server in `./data/mcp/servers.d/`. You can back these files up, edit them by hand, or keep them in git (without the `.secret.json` files):
 
 ```
-servers.d/frigate.json               {"description", "enabled", "command", "args", "env", "supervise"}
-servers.d/music-assistant.json
-servers.d/music-assistant.secret.json   {"env": {"MA_TOKEN": "..."}}  mode 600, never sent to the browser
+data/mcp/
+├── servers.d/
+│   ├── fetch.json                     {"description", "enabled", "command", "args", "env", "supervise"}
+│   ├── music-assistant.json
+│   └── music-assistant.secret.json    {"env": {"MA_TOKEN": "…"}}   mode 600, never sent to the browser
+├── manager.password                   generated if MCP_MANAGER_PASSWORD is not set
+└── servers.json                       optional: imported once if servers.d/ is empty, then left alone
 ```
 
-On first start, an existing `servers.json` is imported. Variables whose names look like `TOKEN`, `KEY`, `SECRET` or `PASSWORD` go to the `.secret.json` files, and `servers.json` itself is left untouched. You can also edit or back up the files by hand. Changes are picked up on the next restart of that server.
+```json
+{
+  "description": "Fetch web pages as markdown",
+  "enabled": true,
+  "command": "uvx",
+  "args": ["--with", "mcp<2.0.0", "mcp-server-fetch"],
+  "env": {},
+  "supervise": { "maxRss": "400M", "hardRss": "1G" }
+}
+```
 
-**How changes apply:**
+### How changes apply
 
-| Change | Effect |
+| Change | What happens |
 |---|---|
 | Edit a server (command, args, env, limits) | Only that server restarts. Client sessions keep working |
-| Stop / Start / Restart / Disable / Enable / Delete | Immediate, only that server |
-| **Add** a new server | Needs a **proxy restart**: mcp-proxy reads its server list only at startup. The page shows a banner, so you can batch changes. All clients reconnect after a few seconds |
+| Start / Stop / Restart / Disable / Enable / Delete | Immediately, only that server |
+| Edit a file in `servers.d/` by hand | Used the next time that server restarts |
+| **Add** a server (or turn supervision on/off) | Needs a **proxy restart**, because mcp-proxy reads its server list only at startup. The page shows a banner so you can batch changes. All clients reconnect after a few seconds |
 
-**Login:** user `admin`, password from `MCP_MANAGER_PASSWORD`. If that is unset, a password is generated on first start, printed once in `docker logs`, and stored in `<MCP_CONFIG_DIR>/manager.password`.
+### Login and security
 
-> **Security:** the admin page can run any command inside the container, so treat it like a root shell. Publish its port only on your LAN or VPN (or keep it unpublished and use an SSH tunnel), and set a strong password. The API rejects requests without credentials (`401`), and rejects writes without its `X-MCP-Manager` header (`403`), which blocks cross-site requests.
+The login is user `admin` with `MCP_MANAGER_PASSWORD`. If that is unset, a password is generated on first start, printed once in `docker logs`, and saved to `data/mcp/manager.password`.
 
-## Per-server supervision (memory, age, crashes, idle stop)
+> [!WARNING]
+> The admin page can run any command inside the container, so treat it like a root shell. Publish port 8015 only on your LAN or VPN (or don't publish it at all and use an SSH tunnel), and use a strong password. The API rejects requests without credentials (`401`), and rejects writes without its `X-MCP-Manager` header (`403`), which blocks cross-site requests.
 
-mcp-proxy starts each stdio server **once** and shares it between all clients, so a leak keeps growing for as long as the container runs. If **one** server exits, mcp-proxy shuts down and takes **all** of them with it.
+The MCP endpoints themselves (port 8005) have **no authentication**. That's how mcp-proxy works in server mode. Keep them on a trusted network, or put an authenticating reverse proxy in front.
+
+## Memory and supervision
+
+mcp-proxy starts each stdio server **once** and shares it between all clients, so a memory leak keeps growing for as long as the container runs. And if **one** server exits, mcp-proxy shuts down and takes **all** of them with it.
 
 [`mcp-supervise`](mcp-supervise.py) sits between mcp-proxy and each server (`mcp-proxy ⇄ mcp-supervise ⇄ uvx/npx …`). It restarts or stops that one server **without mcp-proxy noticing**. After each start it replays the original MCP `initialize` handshake, so mcp-proxy and every client session behind it keep working.
 
-| Option (`servers.json` → `"supervise"`) | Env default | What happens |
+| Limit (page field / `"supervise"` key) | Default for all servers | What happens |
 |---|---|---|
-| `maxRss` e.g. `800M` | `MCP_SUPERVISE_MAX_RSS` | RSS of the server's whole process tree above this → restart once no request is in flight |
-| `hardRss` e.g. `2G` | `MCP_SUPERVISE_HARD_RSS` | Above this → restart immediately. Requests in flight get a JSON-RPC error instead of hanging |
-| `maxAge` e.g. `24h` | `MCP_SUPERVISE_MAX_AGE` | Running longer than this → restart once idle (clears slow leaks) |
-| `idleStop` e.g. `2h` | `MCP_SUPERVISE_IDLE_STOP` | Unused for this long → stop (frees all its RAM). The next request starts it again (only that first call is slower) |
-| `logInterval` e.g. `15m` | `MCP_SUPERVISE_LOG_INTERVAL` | Logs its RSS this often (default `1h`). Useful for choosing limits |
-| *(always)* | | Crash → restart only that server, with backoff. More than 5 crashes in 10 min → give up, as before (mcp-proxy exits and Docker restarts the container) |
+| Max RSS / `maxRss`, e.g. `800M` | `MCP_SUPERVISE_MAX_RSS` | RAM of the server's whole process tree above this → restart once no request is in flight |
+| Hard RSS / `hardRss`, e.g. `2G` | `MCP_SUPERVISE_HARD_RSS` | Above this → restart immediately. Requests in flight get an error instead of hanging |
+| Max age / `maxAge`, e.g. `24h` | `MCP_SUPERVISE_MAX_AGE` | Running longer than this → restart once idle (clears slow leaks) |
+| Idle stop / `idleStop`, e.g. `2h` | `MCP_SUPERVISE_IDLE_STOP` | Unused for this long → stop (frees all its RAM). The next request starts it again; only that first call is slower |
+| `logInterval`, e.g. `15m` | `MCP_SUPERVISE_LOG_INTERVAL` | Writes its RAM use to the log this often (default `1h`) |
+| *(always on)* | | Crash → restart only that server, with backoff. After more than 5 crashes in 10 min it gives up: mcp-proxy exits and Docker restarts the container |
 
-`MCP_SUPERVISE=true` wraps every server, using the env defaults. Per server, `"supervise": {…}` overrides them, and `"supervise": false` opts that server out. mcp-proxy itself ignores the key. See [data/mcp/servers.json.example](data/mcp/servers.json.example). The entrypoint writes a wrapped copy of the config to `/tmp`. Your file is never modified.
+**Choosing limits:** let it run for a day without limits and watch the RAM graphs. Set **Max RSS** to about 2–3× a server's normal value. Use **Hard RSS** as an emergency limit and `mem_limit` as a backstop for the whole container. For servers you rarely use, **Idle stop** saves the most RAM.
 
-**Choosing limits:** run for a day with `MCP_SUPERVISE=true` and no limits. Look at the hourly `rss` lines (`docker logs proxy-mcp | grep rss`) and set `maxRss` to about 2–3× the normal value. Then add `hardRss` as an emergency limit, plus `mem_limit` in compose as a final backstop for the whole container.
+**What a restart loses:** state kept inside the server, such as resource subscriptions. That's fine for the usual stateless tool servers. Requests that aren't in flight are never affected.
 
-**Control socket:** each supervised server listens on `/run/mcp-supervise/<name>.sock` (one JSON line per command: `status`, `log`, `restart`, `stop`, `start`). For example:
+## Images
 
-```sh
-docker exec proxy-mcp python3 -c "import socket,sys;s=socket.socket(socket.AF_UNIX);s.connect('/run/mcp-supervise/fetch.sock');s.sendall(b'{\"cmd\":\"status\"}\n');print(s.makefile().readline())"
-```
+Built by CI for `linux/amd64` and `linux/arm64` and published to GHCR:
 
-**What is lost on a restart:** state kept inside the server, such as resource subscriptions. That's fine for the usual stateless tool servers. Requests that are not in flight are never affected.
+| Tag | What it is |
+|---|---|
+| `ghcr.io/shuricksumy/mcp-manager:latest` | **Stable.** mcp-proxy, the `mcp` SDK, uv and Python are all pinned ([Dockerfile](Dockerfile)). Updates arrive through tested Renovate PRs |
+| `ghcr.io/shuricksumy/mcp-manager:<version>` (e.g. `0.14.0`) | Stable, per mcp-proxy version, for pinning or rollback |
+| `ghcr.io/shuricksumy/mcp-manager:next` | **Newest.** The latest mcp-proxy, uv and `python:3.12-slim`, rebuilt every week ([Dockerfile.next](Dockerfile.next)). Run it next to stable with [compose.next.yml](compose.next.yml) (ports 8006/8016, its own `data/mcp-next`) |
 
-## Environment variables
+Both images fail their build if mcp-proxy can't be imported, so a broken combination never gets published.
+
+**mcp 2.x:** mcp-proxy (0.14.0, and 0.15.0 on its `main` branch) still requires `mcp<2`, because mcp 2.0 removed `request_ctx`, which mcp-proxy uses. Every week the [mcp2-probe](.github/workflows/mcp2-probe.yml) workflow builds `:next` with `MCP_SPEC=mcp>=2`, and opens an issue the first time that works. Your servers are independent of this: each `uvx` server runs in its own environment, which is why the examples pin `--with mcp<2.0.0` per server.
+
+## Without the admin page
+
+With `MCP_MANAGER=false` (the default in compose), the container runs plain mcp-proxy with a hand-written `./data/mcp/servers.json`. See [data/mcp/servers.json.example](data/mcp/servers.json.example).
+
+- **Format:** each server has `command`, `args`, optional `env` and `enabled`. Any other keys, such as `timeout` or `type`, are ignored.
+- **Supervision** is optional: set `MCP_SUPERVISE=true`, or add a `"supervise"` object per server.
+- **Env values** are literal; `${VAR}` is not expanded. To keep secrets out of the file, use `MCP_PROXY_PASS_ENV=true` and pass them as container env vars.
+
+## Configuration reference
 
 | Variable | Default | Effect |
 |---|---|---|
-| `MCP_PROXY_PUBLISHED_PORT` | `8005` | Host port (compose only) |
-| `MCP_PROXY_CONTAINER_NAME` | `mcp-proxy` | Container name (compose only) |
-| `MCP_CONFIG_DIR` | `./data/mcp` | Host dir mounted at `/mcp` (compose only) |
-| `MCP_PROXY_HOST` | `0.0.0.0` | `--host` |
-| `MCP_PROXY_PORT` | `8000` | `--port` (container side) |
-| `MCP_PROXY_TRANSPORT` | `streamablehttp` | `--transport` (mcp-proxy treats it as a client-mode option; server mode serves both `/mcp` and `/sse`) |
-| `MCP_PROXY_CONFIG` | `/mcp/servers.json` | `--named-server-config` |
-| `MCP_PROXY_ALLOWED_HOSTS` | *(empty)* | Comma list → repeated `--allowed-host`, e.g. `192.168.111.111:*,proxy-mcp:*` |
-| `MCP_PROXY_ALLOW_ORIGINS` | `*` | Comma list → repeated `--allow-origin`. Set it to empty to turn CORS off |
-| `MCP_PROXY_PASS_ENV` | `false` | `true` → `--pass-environment` |
-| `MCP_PROXY_LOG_LEVEL` | *(empty)* | `--log-level` |
-| `MCP_PROXY_DEBUG` | `false` | `true` → `--debug` |
+| **Admin page** | | |
+| `MCP_MANAGER` | `false` | `true` → admin page, servers stored in `servers.d/`, every server supervised |
+| `MCP_MANAGER_PASSWORD` | *(generated)* | Admin password (user `admin`) |
+| `MCP_MANAGER_PORT` | `8001` | Admin page port inside the container |
+| `MCP_MANAGER_PUBLISHED_PORT` | `8015` | Host port for the admin page (compose only) |
+| **Supervision defaults** | | |
+| `MCP_SUPERVISE` | `false` | Supervise every server (always on with `MCP_MANAGER=true`) |
+| `MCP_SUPERVISE_MAX_RSS` / `_HARD_RSS` / `_MAX_AGE` / `_IDLE_STOP` / `_LOG_INTERVAL` | *(none)* | Defaults for the limits above |
+| **mcp-proxy** | | |
+| `MCP_PROXY_PUBLISHED_PORT` | `8005` | Host port for the MCP endpoints, also used for the links on the page |
+| `MCP_PROXY_ALLOWED_HOSTS` | *(empty)* | Comma list → repeated `--allowed-host`, e.g. `192.168.1.10:*,mcp-manager:*` |
+| `MCP_PROXY_ALLOW_ORIGINS` | `*` | Comma list → repeated `--allow-origin`. Empty turns CORS off |
+| `MCP_PROXY_PASS_ENV` | `false` | `true` → `--pass-environment`: servers inherit the container environment |
+| `MCP_PROXY_LOG_LEVEL` / `MCP_PROXY_DEBUG` | | `--log-level` / `--debug` |
 | `MCP_PROXY_EXTRA_ARGS` | *(empty)* | Raw extra flags, split on whitespace |
+| `MCP_PROXY_HOST` / `MCP_PROXY_PORT` / `MCP_PROXY_TRANSPORT` / `MCP_PROXY_CONFIG` | `0.0.0.0` / `8000` / `streamablehttp` / `/mcp/servers.json` | Rarely changed |
+| `MCP_PROXY_CONTAINER_NAME`, `MCP_CONFIG_DIR`, `MCP_PROXY_IMAGE_TAG` | | Compose only: container name, host config dir, image tag |
 
-List items are trimmed and empty items are skipped. Arguments given in compose `command:` are added at the end. The full command is printed at startup. Only flags are printed, never environment values.
+The full mcp-proxy command line is printed at startup (only flags, never env values).
 
-## Troubleshooting: HTTP 421 "Invalid Host header"
+## Troubleshooting
 
-From 0.13.3 on, mcp-proxy has DNS-rebinding protection. It accepts only loopback `Host` headers and the bind host. Requests from LAN clients (`Host: 192.168.111.111:8005`) or from other containers (`Host: proxy-mcp:8000`) fail with **421**, and the log shows `Invalid Host header: ...`. To fix it, list every hostname clients use in `MCP_PROXY_ALLOWED_HOSTS`. A wildcard port (`host:*`) is supported. `--allow-origin` only covers the `Origin` header. It does not help with this error.
+- **HTTP 421 "Invalid Host header":** since 0.13.3, mcp-proxy only accepts loopback `Host` headers. Add every name clients use (LAN IP, DNS name, container name) to `MCP_PROXY_ALLOWED_HOSTS`; a wildcard port (`host:*`) is supported. `MCP_PROXY_ALLOW_ORIGINS` only covers the `Origin` header and doesn't fix this.
+- **A new server shows "not loaded":** it's saved but mcp-proxy hasn't loaded it yet. Click **Restart proxy** in the banner.
+- **A server never starts:** open its **Logs**. A server that fails *before* its first successful start makes mcp-proxy exit. The manager restarts mcp-proxy with backoff, so disable or fix that server.
+- **`npm WARN EBADENGINE … required: { node: '>=24' }`** in a server's log: the image currently ships Debian's Node.js 20. Most servers still work. A server that really needs a newer Node won't start.
+- **First start is slow:** `uvx`/`npx` download each server on its first run. Mounting the uv and npm caches (see Quick start) makes later starts fast.
+- **docker.sock:** if a server needs `/var/run/docker.sock`, mounting it `:ro` **still effectively gives root on the host**, because read-only applies to the socket file, not to the Docker API. Mount it only for servers you trust.
 
-## Security
+## Development
 
-- **There is no authentication.** In server mode, mcp-proxy does not check incoming credentials. `API_ACCESS_TOKEN` only applies in client mode, so setting it does **not** protect this endpoint. Limit who can reach the port (firewall, an internal Docker network, a VPN), or put an authenticating reverse proxy in front.
-- If a stdio server needs `/var/run/docker.sock`, mounting it `:ro` **still effectively gives root on the host**. Read-only applies to the socket file, not to the Docker API, which can still start privileged containers. Mount it only for servers you trust.
-- `MCP_PROXY_PASS_ENV=true` passes the whole container environment to every stdio server.
-
-## Automation
-
-- **ci** (PRs, and before every publish): builds both images and runs the smoke test plus the end-to-end tests for mcp-supervise ([tests/supervise-test.py](tests/supervise-test.py)) and mcp-manager ([tests/manager-test.py](tests/manager-test.py)) on each, plus shellcheck.
-- **release** (push to `main`, weekly, manual): runs CI, then publishes `:latest`, `:<version>` and `:next`.
-- **Renovate** ([renovate.json](renovate.json), shared preset `shuricksumy/renovate-config`) owns version updates.
-  - mcp-proxy and `mcp` are updated together in one PR. Patch and minor updates merge automatically once CI passes.
-  - `mcp` 2.x is skipped for the stable image (see mcp2-probe above).
-  - Action and image digest pins, and uv patch/minor updates, also merge automatically.
-- **Dependabot** handles security updates only. Security patch PRs merge automatically.
-- Also: CodeQL (scans the workflows), zizmor, dependency-review, Renovate config validation, and a monthly GHCR cleanup of untagged images.
+- **Tests**, run in CI on both images:
+  - [scripts/smoke-test.sh](scripts/smoke-test.sh): MCP `initialize` with an allowed Host, and 421 for an unknown one.
+  - [tests/supervise-test.py](tests/supervise-test.py): 21 checks covering limits, crash, in-flight protection, control socket and idle-stop.
+  - [tests/manager-test.py](tests/manager-test.py): 25 checks covering auth, import and secrets, a live edit keeping the client session, stop/start, add + proxy restart, validation and persistence.
+- **Run locally:** `docker build -t mcp-manager:dev . && python3 tests/manager-test.py mcp-manager:dev`.
+- **Workflows:**
+  - **ci** on every PR;
+  - **release** on push to `main`, weekly and on demand: runs CI, then publishes `:latest`, `:<version>` and `:next`;
+  - **mcp2-probe** weekly;
+  - also CodeQL, zizmor, dependency-review, Renovate config validation and a monthly GHCR cleanup.
+- **`main` is protected:** changes go through PRs, and the required checks are both image builds (with all tests), shellcheck, CodeQL and dependency-review.
+- **Renovate** ([renovate.json](renovate.json), shared preset `shuricksumy/renovate-config`) owns version updates. **Patch and minor updates merge themselves once the required checks pass.** The exceptions:
+  - **Majors** and **Python minor bumps** (e.g. 3.12 → 3.15) wait for a review.
+  - **mcp-proxy and `mcp`** are bumped together, after a 3-day settling period.
+  - **`mcp` 2.x** is skipped for the stable image.
+- **Dependabot** only opens security updates. Patch and minor security fixes merge themselves.

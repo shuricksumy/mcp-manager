@@ -70,3 +70,8 @@ jobs:
           provenance: mode=max
           sbom: true
           tags: ${{ steps.tags.outputs.tags }}
+          # Links the GHCR package to this repository (visibility, permissions, README).
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.title=mcp-manager (${{ matrix.variant }})
+            org.opencontainers.image.description=MCP servers over HTTP via mcp-proxy, with an admin page and per-server supervision

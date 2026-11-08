@@ -63,7 +63,7 @@ def _load_supervise():
 sup = _load_supervise()
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-SECRET_RE = re.compile(r"TOKEN|SECRET|PASSW|API_?KEY|(^|_)KEY$|CREDENTIAL|AUTH|COOKIE|PRIVATE", re.I)
+SECRET_RE = re.compile(r"TOKEN|SECRET|PASSW|API_?KEY|(^|_)KEY$|CREDENTIAL|AUTHORIZATION|COOKIE|PRIVATE", re.I)
 SUPERVISE_KEYS = ("maxRss", "hardRss", "maxAge", "idleStop", "logInterval")
 HISTORY_POINTS = 720  # 1 h at the 5 s sampling interval
 SAMPLE_INTERVAL = 5.0
