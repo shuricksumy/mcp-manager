@@ -26,6 +26,10 @@ proxy's session (and every client session behind it) keeps working. State
 inside the server (e.g. resource subscriptions) is lost - fine for the usual
 stateless tool servers.
 
+With --definition FILE (written by mcp-manager: {"command", "args", "env",
+"supervise"}), every (re)start reloads the server's command, args, env and
+limits from that file, so an edited server only needs a restart of itself.
+
 Control socket (--control-dir): one JSON line in, one JSON line out:
   {"cmd": "status"} | {"cmd": "log"} | {"cmd": "restart"} | {"cmd": "stop"} | {"cmd": "start"}
 A server stopped this way answers requests with an error until it is started.
@@ -163,6 +167,17 @@ class Supervisor:
         self.init_timeout = args.init_timeout
         self.grace = args.grace
         self.control_dir = args.control_dir
+        self.definition = args.definition
+        self.def_env: dict[str, str] = {}
+        # Environment for the server: what mcp-proxy gave us. With a definition
+        # file, its "env" is replaced on every reload instead of accumulating.
+        self.base_env = dict(os.environ)
+        if self.definition:
+            loaded = self.read_definition()
+            if loaded is not None:
+                for key in loaded.get("env", {}):
+                    self.base_env.pop(key, None)
+                self.def_env = {k: str(v) for k, v in loaded.get("env", {}).items()}
 
         self.child: asyncio.subprocess.Process | None = None
         self.retired: set[int] = set()  # pids we stopped on purpose
@@ -228,11 +243,47 @@ class Supervisor:
         self.inflight_in.clear()
         self.inflight_out.clear()
 
+    # -- definition reload -------------------------------------------------
+
+    def read_definition(self) -> dict | None:
+        try:
+            with open(self.definition, encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data.get("command"), str) or not isinstance(data.get("args", []), list):
+                raise ValueError("needs a string \"command\" and a list \"args\"")
+            return data
+        except (OSError, ValueError) as exc:
+            self.log(f"definition {self.definition} not used: {exc}")
+            return None
+
+    def reload_definition(self) -> None:
+        data = self.read_definition() if self.definition else None
+        if data is None:
+            return
+        cmd = [data["command"], *[str(a) for a in data.get("args", [])]]
+        env = {k: str(v) for k, v in data.get("env", {}).items()}
+        sup = data.get("supervise") or {}
+        limits = {}
+        try:
+            for key, attr in (("maxRss", "max_rss"), ("hardRss", "hard_rss"), ("maxAge", "max_age"), ("idleStop", "idle_stop")):
+                value = sup.get(key)
+                limits[attr] = (parse_size if key.endswith("Rss") else parse_duration)(str(value)) if value else None
+        except ValueError as exc:
+            self.log(f"definition limits not used: {exc}")
+            limits = {}
+        changed = cmd != self.cmd or env != self.def_env
+        self.cmd, self.def_env = cmd, env
+        for attr, value in limits.items():
+            setattr(self, attr, value)
+        if changed:
+            self.log(f"definition reloaded: {' '.join(cmd)}")
+
     # -- child process -----------------------------------------------------
 
     async def spawn(self) -> None:
         self.child = await asyncio.create_subprocess_exec(
             *self.cmd,
+            env={**self.base_env, **self.def_env},
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,  # copied to our stderr and kept for status
@@ -424,6 +475,7 @@ class Supervisor:
                     )
                 else:
                     self.log(f"starting ({reason})")
+                self.reload_definition()
                 await self.spawn()
                 if self.init_request is not None:
                     key = f"mcp-supervise-init-{self.generation}"
@@ -586,6 +638,7 @@ class Supervisor:
             "idle": time.monotonic() - self.last_activity,
             "last_request": self.last_request_wall,
             "events": list(self.events),
+            "command": self.cmd,
         }
 
     async def control(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -683,6 +736,25 @@ ENV = {
 }
 
 
+def supervise_args(name: str, opts: dict, control_dir: str = "", definition: str = "") -> list[str]:
+    """mcp-supervise arguments (before "--") for one server; validates `opts`."""
+    unknown = set(opts) - set(OPTIONS)
+    if unknown:
+        raise ValueError(f"server '{name}': unknown supervise option(s): {', '.join(sorted(unknown))}")
+    args = ["--name", name]
+    if control_dir:
+        args += ["--control-dir", control_dir]
+    if definition:
+        args += ["--definition", definition]
+    for key, value in opts.items():
+        if value in (None, ""):
+            continue
+        flag, parser = OPTIONS[key]
+        parser(str(value))  # validate now, not at runtime
+        args += [flag, str(value)]
+    return args
+
+
 def wrap_config(src: str, dst: str) -> int:
     """Wrap servers in mcp-supervise. 0: wrote dst, 2: nothing to wrap, 1: error.
 
@@ -707,18 +779,8 @@ def wrap_config(src: str, dst: str) -> int:
         if not isinstance(sup, dict):
             raise ValueError(f"server '{name}': \"supervise\" must be true, false or an object")
         opts = {**defaults, **sup}
-        unknown = set(opts) - set(OPTIONS)
-        if unknown:
-            raise ValueError(f"server '{name}': unknown supervise option(s): {', '.join(sorted(unknown))}")
-        args = ["--name", name]
-        if control_dir:
-            args += ["--control-dir", control_dir]
-        summary = []
-        for key, value in opts.items():
-            flag, parser = OPTIONS[key]
-            parser(str(value))  # validate now, not at runtime
-            args += [flag, str(value)]
-            summary.append(f"{key}={value}")
+        args = supervise_args(name, opts, control_dir)
+        summary = [f"{k}={v}" for k, v in opts.items() if v not in (None, "")]
         server["args"] = [*args, "--", server["command"], *server.get("args", [])]
         server["command"] = "mcp-supervise"
         wrapped += 1
@@ -758,6 +820,7 @@ def main() -> int:
     p.add_argument("--init-timeout", type=parse_duration, default=60.0)
     p.add_argument("--grace", type=parse_duration, default=5.0, help="wait between stop signals")
     p.add_argument("--control-dir", help="directory for the control socket")
+    p.add_argument("--definition", help="JSON file with command/args/env/supervise, reloaded on every restart")
     p.add_argument("command", nargs=argparse.REMAINDER)
     args = p.parse_args()
     if args.command and args.command[0] == "--":

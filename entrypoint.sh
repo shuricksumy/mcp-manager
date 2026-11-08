@@ -39,7 +39,14 @@ MCP_PROXY_EXTRA_ARGS="${MCP_PROXY_EXTRA_ARGS:-}"
 # of them with MCP_SUPERVISE=true, or those with a "supervise" key) into a
 # generated copy of the config. The original file is never modified.
 export MCP_SUPERVISE_DIR="${MCP_SUPERVISE_DIR:-/run/mcp-supervise}"  # control sockets
-if [ -f "$MCP_PROXY_CONFIG" ] && command -v mcp-supervise > /dev/null 2>&1; then
+
+# Manager mode: mcp-manager stores the servers (one file each), generates
+# mcp-proxy's config, runs mcp-proxy and serves the admin page.
+MCP_MANAGER="${MCP_MANAGER:-false}"
+if is_true "$MCP_MANAGER"; then
+    MCP_MANAGER_IMPORT="${MCP_MANAGER_IMPORT:-$MCP_PROXY_CONFIG}"
+    MCP_PROXY_CONFIG=/tmp/mcp-manager/servers.json
+elif [ -f "$MCP_PROXY_CONFIG" ] && command -v mcp-supervise > /dev/null 2>&1; then
     supervised=/tmp/mcp-proxy-servers.supervised.json
     rc=0
     mcp-supervise wrap-config "$MCP_PROXY_CONFIG" "$supervised" || rc=$?
@@ -102,7 +109,7 @@ fi
 
 eval "set -- \"\$@\" $user_args"
 
-if [ ! -f "$MCP_PROXY_CONFIG" ]; then
+if ! is_true "$MCP_MANAGER" && [ ! -f "$MCP_PROXY_CONFIG" ]; then
     echo "entrypoint: WARNING: named server config '$MCP_PROXY_CONFIG' not found" >&2
 fi
 
@@ -117,4 +124,13 @@ printf 'entrypoint: exec'
 for a in "$@"; do printf ' %s' "$(quote "$a")"; done
 printf '\n'
 
+if is_true "$MCP_MANAGER"; then
+    exec mcp-manager \
+        --servers-dir "${MCP_MANAGER_SERVERS_DIR:-/mcp/servers.d}" \
+        --import "$MCP_MANAGER_IMPORT" \
+        --port "${MCP_MANAGER_PORT:-8001}" \
+        --control-dir "$MCP_SUPERVISE_DIR" \
+        --proxy-config "$MCP_PROXY_CONFIG" \
+        -- "$@"
+fi
 exec "$@"

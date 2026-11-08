@@ -43,6 +43,8 @@ jobs:
         run: scripts/smoke-test.sh mcp-proxy-stack:ci
       - name: mcp-supervise end-to-end (restart on memory/age/crash, stop/start, idle-stop)
         run: python3 tests/supervise-test.py mcp-proxy-stack:ci
+      - name: mcp-manager end-to-end (admin API, per-server files, live edit, proxy restart)
+        run: python3 tests/manager-test.py mcp-proxy-stack:ci
 
   shellcheck:
     runs-on: ubuntu-latest
@@ -51,4 +53,4 @@ jobs:
         with:
           persist-credentials: false
       - run: shellcheck entrypoint.sh scripts/*.sh
-      - run: python3 -m py_compile mcp-supervise.py tests/*.py
+      - run: python3 -m py_compile mcp-supervise.py mcp-manager.py tests/*.py

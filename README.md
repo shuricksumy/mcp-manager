@@ -40,6 +40,39 @@ Endpoints: `http://<host>:8005/servers/<name>/mcp` (streamable HTTP) and `.../se
 
 `servers.json` uses the `mcpServers` format: each entry has `command`, `args` (a list), an optional `env` (object) and an optional `enabled` (default `true`). mcp-proxy ignores any other keys, such as `timeout`, `type` or `transportType`. `env` values are literal. `${VAR}` is **not** expanded, so to keep secrets out of the file, set `MCP_PROXY_PASS_ENV=true` and pass them as container env vars.
 
+## Admin page (mcp-manager)
+
+![Admin page](docs/admin-page.png)
+
+With `MCP_MANAGER=true`, servers are managed from a web page instead of a hand-edited `servers.json`:
+
+- **Add, edit, delete** servers: command, arguments, environment (with **secret** values) and limits. You can also **import** an `mcpServers` JSON block, e.g. from a server's README.
+- **Monitor** each server: state, RAM with a 1-hour graph against its limits, uptime, requests and errors, restarts and crashes, last event, and live **logs**.
+- **Control** each server: **Start / Stop / Restart**. A stopped server answers requests with an error, and an idle-stopped one ("sleeping") wakes on the next request.
+- The page also shows mcp-proxy's state and version and the container's memory use, and has a **Restart proxy** button.
+
+**Storage:** one file per server in `<MCP_CONFIG_DIR>/servers.d/` (on the host: `./data/mcp/servers.d/`):
+
+```
+servers.d/frigate.json               {"description", "enabled", "command", "args", "env", "supervise"}
+servers.d/music-assistant.json
+servers.d/music-assistant.secret.json   {"env": {"MA_TOKEN": "..."}}  mode 600, never sent to the browser
+```
+
+On first start, an existing `servers.json` is imported. Variables whose names look like `TOKEN`, `KEY`, `SECRET` or `PASSWORD` go to the `.secret.json` files, and `servers.json` itself is left untouched. You can also edit or back up the files by hand. Changes are picked up on the next restart of that server.
+
+**How changes apply:**
+
+| Change | Effect |
+|---|---|
+| Edit a server (command, args, env, limits) | Only that server restarts. Client sessions keep working |
+| Stop / Start / Restart / Disable / Enable / Delete | Immediate, only that server |
+| **Add** a new server | Needs a **proxy restart**: mcp-proxy reads its server list only at startup. The page shows a banner, so you can batch changes. All clients reconnect after a few seconds |
+
+**Login:** user `admin`, password from `MCP_MANAGER_PASSWORD`. If that is unset, a password is generated on first start, printed once in `docker logs`, and stored in `<MCP_CONFIG_DIR>/manager.password`.
+
+> **Security:** the admin page can run any command inside the container, so treat it like a root shell. Publish its port only on your LAN or VPN (or keep it unpublished and use an SSH tunnel), and set a strong password. The API rejects requests without credentials (`401`), and rejects writes without its `X-MCP-Manager` header (`403`), which blocks cross-site requests.
+
 ## Per-server supervision (memory, age, crashes, idle stop)
 
 mcp-proxy starts each stdio server **once** and shares it between all clients, so a leak keeps growing for as long as the container runs. If **one** server exits, mcp-proxy shuts down and takes **all** of them with it.
@@ -99,7 +132,7 @@ From 0.13.3 on, mcp-proxy has DNS-rebinding protection. It accepts only loopback
 
 ## Automation
 
-- **ci** (PRs, and before every publish): builds both images and runs the smoke test and the mcp-supervise end-to-end test ([tests/supervise-test.py](tests/supervise-test.py)) on each, plus shellcheck.
+- **ci** (PRs, and before every publish): builds both images and runs the smoke test plus the end-to-end tests for mcp-supervise ([tests/supervise-test.py](tests/supervise-test.py)) and mcp-manager ([tests/manager-test.py](tests/manager-test.py)) on each, plus shellcheck.
 - **release** (push to `main`, weekly, manual): runs CI, then publishes `:latest`, `:<version>` and `:next`.
 - **Renovate** ([renovate.json](renovate.json), shared preset `shuricksumy/renovate-config`) owns version updates.
   - mcp-proxy and `mcp` are updated together in one PR. Patch and minor updates merge automatically once CI passes.

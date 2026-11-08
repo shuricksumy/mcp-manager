@@ -26,7 +26,7 @@ def text(t):
 
 TOOLS = [
     {"name": n, "description": n, "inputSchema": {"type": "object", "properties": {}}}
-    for n in ("pid", "leak", "crash", "sleep")
+    for n in ("pid", "leak", "crash", "sleep", "env")
 ]
 
 
@@ -44,6 +44,8 @@ def call(req):
         return text(f"leaked {mb}M")
     if name == "crash":
         os._exit(3)
+    if name == "env":
+        return text(os.environ.get(str(args.get("name", "")), "<unset>"))
     if name == "sleep":
         time.sleep(float(args.get("seconds", 1)))
         return text("slept")
