@@ -6,8 +6,11 @@ on:
 permissions:
   contents: read
 
+# PRs: a new push cancels the older CI run. Called from release.yml: one group
+# per run (github.workflow would be the caller's name there, so release runs
+# for consecutive merges would share - and cancel within - one group).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
