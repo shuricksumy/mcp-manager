@@ -1,10 +1,10 @@
 name: ghcr-cleanup
 # Removes what piles up in ghcr.io/<owner>/mcp-manager. release.yml re-points
-# :latest and :next on every push to main and on the weekly rebuild; the image a
+# :latest, :legacy and :preview on every push to main and on the weekly rebuild; the image a
 # tag pointed to before then remains as an untagged multi-arch set, plus its
 # provenance / SBOM attestations.
 #
-# Never deleted: anything tagged (:latest, :next, :<mcp-proxy version> - the
+# Never deleted: anything tagged (:latest, :legacy, :preview, :<mcp-proxy version> - the
 # version tags are what you pin or roll back to). Deleted: untagged images no
 # tag still uses, and attestations whose image no longer exists.
 on:

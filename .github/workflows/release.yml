@@ -1,13 +1,17 @@
 name: release
 # Publishes ghcr.io/<owner>/mcp-manager:
-#   :latest, :<mcp-proxy version>  stable image (Dockerfile, pinned versions)
-#   :next                          newest mcp-proxy (Dockerfile.next), rebuilt weekly
+#   :latest, :<mcp-proxy version>  default image (Dockerfile, pinned versions)
+#   :legacy                        the mcp-1 line. Today the same image as :latest;
+#                                  when :latest moves to mcp 2, :legacy keeps being
+#                                  built from a Dockerfile.legacy pinned to mcp 1.
+#   :preview                       newest mcp-proxy (Dockerfile.preview), rebuilt
+#                                  weekly; where the next mcp SDK major is tried
 on:
   # Only what is merged into main is published.
   push:
     branches: [main]
   schedule:
-    - cron: "17 4 * * 1" # weekly: base-image / OS security patches, and a fresh :next
+    - cron: "17 4 * * 1" # weekly: base-image / OS security patches, and a fresh :preview
   workflow_dispatch:
 
 permissions:
@@ -34,8 +38,8 @@ jobs:
         include:
           - variant: stable
             dockerfile: Dockerfile
-          - variant: next
-            dockerfile: Dockerfile.next
+          - variant: preview
+            dockerfile: Dockerfile.preview
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,9 +50,9 @@ jobs:
           if [ "$VARIANT" = stable ]; then
             version="$(sed -n 's/^ARG MCP_PROXY_VERSION=//p' Dockerfile)"
             [ -n "$version" ] || { echo "MCP_PROXY_VERSION not found in Dockerfile"; exit 1; }
-            tags="${image}:latest,${image}:${version}"
+            tags="${image}:latest,${image}:${version},${image}:legacy"
           else
-            tags="${image}:next"
+            tags="${image}:preview"
           fi
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
         env:

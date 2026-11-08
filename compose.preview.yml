@@ -1,28 +1,28 @@
-# "Next" stack: newest mcp-proxy, separate config, separate port.
+# "preview" stack (:preview): newest mcp-proxy, separate config, separate ports.
 # Runs side by side with the stable stack (compose.yml).
 #
-#   cp .env.next.example .env.next
-#   cp data/mcp-next/servers.json.example data/mcp-next/servers.json
-#   docker compose -f compose.next.yml --env-file .env.next pull   # prebuilt :next (rebuilt weekly)
-#   docker compose -f compose.next.yml --env-file .env.next up -d
+#   cp .env.preview.example .env.preview
+#   cp data/mcp-preview/servers.json.example data/mcp-preview/servers.json
+#   docker compose -f compose.preview.yml --env-file .env.preview pull   # prebuilt :preview (rebuilt weekly)
+#   docker compose -f compose.preview.yml --env-file .env.preview up -d
 #
 # To build locally instead (e.g. with MCP_SPEC=mcp>=2), use `build --no-cache`:
 # the default MCP_PROXY_SPEC is unpinned, and without --no-cache Docker reuses
 # the cached layer instead of fetching the newest release.
-name: mcp-proxy-next
+name: mcp-manager-preview
 
 services:
-  mcp-proxy-next:
+  mcp-manager-preview:
     build:
       context: .
-      dockerfile: Dockerfile.next
+      dockerfile: Dockerfile.preview
       args:
         MCP_PROXY_SPEC: ${MCP_PROXY_SPEC:-mcp-proxy}
         MCP_SPEC: ${MCP_SPEC:-}
         UV_VERSION: ${UV_VERSION:-latest}
         PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
-    image: ghcr.io/shuricksumy/mcp-manager:next
-    container_name: ${MCP_PROXY_CONTAINER_NAME:-mcp-proxy-next}
+    image: ghcr.io/shuricksumy/mcp-manager:preview
+    container_name: ${MCP_PROXY_CONTAINER_NAME:-mcp-manager-preview}
     restart: unless-stopped
     ports:
       - "${MCP_PROXY_PUBLISHED_PORT:-8006}:${MCP_PROXY_PORT:-8000}"
@@ -53,4 +53,4 @@ services:
     # Optional backstop for the whole container (all servers + proxy):
     # mem_limit: 4g
     volumes:
-      - ${MCP_CONFIG_DIR:-./data/mcp-next}:/mcp
+      - ${MCP_CONFIG_DIR:-./data/mcp-preview}:/mcp

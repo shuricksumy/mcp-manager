@@ -62,7 +62,7 @@
       ]
     },
     {
-      "description": "No mcp 2.x for the stable image: mcp-proxy (<= 0.15.0) caps mcp<2 and crashes on import with mcp 2. The :next image and the mcp2-probe workflow track that instead.",
+      "description": "No mcp 2.x for the stable image: mcp-proxy (<= 0.15.0) caps mcp<2 and crashes on import with mcp 2. The :preview image and the sdk-probe workflow track that instead.",
       "matchDatasources": [
         "pypi"
       ],

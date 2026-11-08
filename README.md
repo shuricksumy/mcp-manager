@@ -24,7 +24,10 @@ It's built on [`mcp-proxy`](https://github.com/sparfenyuk/mcp-proxy), which does
   - `maxAge`: restart after running this long, to clear slow leaks.
   - `idleStop`: stop an unused server and start it again on its next request.
 - **Failure isolation:** a server that crashes, or fails or hangs at startup, never takes the others down. It's marked **failed** and retried with backoff. Plain mcp-proxy stops *all* servers when one exits, and waits forever for one that hangs at startup.
-- **Two images:** a pinned **stable** one, and a weekly **`next`** one that tracks the newest mcp-proxy and is ready for the mcp 2 SDK.
+- **Images with a clear lifecycle:**
+  - **`latest`:** pinned, the default.
+  - **`legacy`:** the mcp-1 line, which never moves to mcp 2.
+  - **`preview`:** rebuilt weekly from the newest mcp-proxy, where the next SDK major is tried first.
 - **Maintained automatically:** Renovate keeps everything pinned and up to date. Updates merge themselves only after the full end-to-end test suite passes.
 
 ## Quick start
@@ -209,15 +212,16 @@ Built by CI for `linux/amd64` and `linux/arm64` and published to GHCR:
 
 | Tag | What it is |
 |---|---|
-| `ghcr.io/shuricksumy/mcp-manager:latest` | **Stable.** mcp-proxy, the `mcp` SDK, uv and Python are all pinned ([Dockerfile](Dockerfile)). Updates arrive through tested Renovate PRs |
-| `ghcr.io/shuricksumy/mcp-manager:<version>` (e.g. `0.14.0`) | Stable, per mcp-proxy version, for pinning or rollback |
-| `ghcr.io/shuricksumy/mcp-manager:next` | **Newest.** The latest mcp-proxy, uv and `python:3.12-slim`, rebuilt every week ([Dockerfile.next](Dockerfile.next)). Run it next to stable with [compose.next.yml](compose.next.yml) (ports 8006/8016, its own `data/mcp-next`) |
+| `ghcr.io/shuricksumy/mcp-manager:latest` | **Default.** mcp-proxy, the `mcp` SDK, uv and Python are all pinned ([Dockerfile](Dockerfile)). Updates arrive through tested Renovate PRs. Moves to mcp 2 once mcp-proxy supports it |
+| `ghcr.io/shuricksumy/mcp-manager:<version>` (e.g. `0.14.0`) | Same as `latest`, per mcp-proxy version, for pinning or rollback |
+| `ghcr.io/shuricksumy/mcp-manager:legacy` | **The mcp-1 line.** Today it's the same image as `latest`. When `latest` moves to mcp 2, `legacy` keeps being built on mcp 1 (from a `Dockerfile.legacy`). Pin it if you never want that move |
+| `ghcr.io/shuricksumy/mcp-manager:preview` | **Newest.** The latest mcp-proxy, uv and `python:3.12-slim`, rebuilt every week ([Dockerfile.preview](Dockerfile.preview)). This is where the next SDK major is tried (mcp 2 today, mcp 3 later). Run it next to `latest` with [compose.preview.yml](compose.preview.yml) (ports 8006/8016, its own `data/mcp-preview`) |
 
-Both images fail their build if mcp-proxy can't be imported, so a broken combination never gets published.
+All images fail their build if mcp-proxy can't be imported, so a broken combination never gets published.
 
 **mcp 2.x:** two separate things have an mcp version.
 - **Your servers can already use mcp 2.** Each `uvx` server installs its own `mcp` version, independent of the image, and talks to mcp-proxy over the MCP protocol. mcp 2 servers still support the protocol versions mcp-proxy speaks (up to `2025-11-25`). For example, `mcp-server-fetch` and `frigate-mcp` resolve to mcp 2.3 and work behind the stable image (verified by listing their tools and making a real `fetch` call). Older guides add `--with mcp<2.0.0` to each server; you don't need that. Add it back only for a server that fails with mcp 2.
-- **mcp-proxy itself is still on mcp 1.x.** mcp-proxy 0.14.0 (and 0.15.0 on its `main` branch) requires `mcp<2`, because mcp 2 redesigned the server API it is built on. Until it supports mcp 2, the newest protocol version (`2026-07-28`) isn't available through the proxy. Every week the [mcp2-probe](.github/workflows/mcp2-probe.yml) workflow builds `:next` with `MCP_SPEC=mcp>=2`, and opens an issue the first time that works.
+- **mcp-proxy itself is still on mcp 1.x.** mcp-proxy 0.14.0 (and 0.15.0 on its `main` branch) requires `mcp<2`, because mcp 2 redesigned the server API it is built on. Until it supports mcp 2, the newest protocol version (`2026-07-28`) isn't available through the proxy. Every week the [sdk-probe](.github/workflows/sdk-probe.yml) workflow builds `:preview` with `MCP_SPEC=mcp>=2`, and opens an issue with the switch steps the first time that works. After the switch, `latest` runs on mcp 2, `legacy` stays on mcp 1, and the probe moves on to mcp 3.
 
 ## Without the admin page
 
@@ -270,10 +274,10 @@ The full mcp-proxy command line is printed at startup (only flags, never env val
 - **Run locally:** `docker build -t mcp-manager:dev . && python3 tests/manager-test.py mcp-manager:dev`.
 - **Workflows:**
   - **ci** on every PR;
-  - **release** on push to `main`, weekly and on demand: runs CI, then publishes `:latest`, `:<version>` and `:next`;
-  - **mcp2-probe** weekly;
+  - **release** on push to `main`, weekly and on demand: runs CI, then publishes `:latest`, `:<version>`, `:legacy` and `:preview`;
+  - **sdk-probe** weekly: tries the next mcp SDK major on `:preview`;
   - also CodeQL, zizmor, dependency-review, Renovate config validation and a monthly GHCR cleanup.
-- **`main` is protected:** changes go through PRs, and the required checks are both image builds (with all tests), shellcheck, CodeQL and dependency-review.
+- **`main` is protected:** changes go through PRs. The required checks are `image (stable)` and `image (preview)` (both image builds, with all tests), shellcheck, CodeQL and dependency-review.
 - **Renovate** ([renovate.json](renovate.json), shared preset `shuricksumy/renovate-config`) owns version updates. **Patch and minor updates merge themselves once the required checks pass.** The exceptions:
   - **Majors** wait for a review.
   - **Python is locked to 3.12:** minor and major Python upgrades are never proposed, because `uvx` servers run on the image's Python and a new minor can break them (3.15 broke `mcp-server-qdrant`). 3.12 patch and security refreshes still merge themselves.
