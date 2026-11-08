@@ -40,6 +40,33 @@ Endpoints: `http://<host>:8005/servers/<name>/mcp` (streamable HTTP) and `.../se
 
 `servers.json` uses the `mcpServers` format: each entry has `command`, `args` (a list), an optional `env` (object) and an optional `enabled` (default `true`). mcp-proxy ignores any other keys, such as `timeout`, `type` or `transportType`. `env` values are literal. `${VAR}` is **not** expanded, so to keep secrets out of the file, set `MCP_PROXY_PASS_ENV=true` and pass them as container env vars.
 
+## Per-server supervision (memory, age, crashes, idle stop)
+
+mcp-proxy starts each stdio server **once** and shares it between all clients, so a leak keeps growing for as long as the container runs. If **one** server exits, mcp-proxy shuts down and takes **all** of them with it.
+
+[`mcp-supervise`](mcp-supervise.py) sits between mcp-proxy and each server (`mcp-proxy ⇄ mcp-supervise ⇄ uvx/npx …`). It restarts or stops that one server **without mcp-proxy noticing**. After each start it replays the original MCP `initialize` handshake, so mcp-proxy and every client session behind it keep working.
+
+| Option (`servers.json` → `"supervise"`) | Env default | What happens |
+|---|---|---|
+| `maxRss` e.g. `800M` | `MCP_SUPERVISE_MAX_RSS` | RSS of the server's whole process tree above this → restart once no request is in flight |
+| `hardRss` e.g. `2G` | `MCP_SUPERVISE_HARD_RSS` | Above this → restart immediately. Requests in flight get a JSON-RPC error instead of hanging |
+| `maxAge` e.g. `24h` | `MCP_SUPERVISE_MAX_AGE` | Running longer than this → restart once idle (clears slow leaks) |
+| `idleStop` e.g. `2h` | `MCP_SUPERVISE_IDLE_STOP` | Unused for this long → stop (frees all its RAM). The next request starts it again (only that first call is slower) |
+| `logInterval` e.g. `15m` | `MCP_SUPERVISE_LOG_INTERVAL` | Logs its RSS this often (default `1h`). Useful for choosing limits |
+| *(always)* | | Crash → restart only that server, with backoff. More than 5 crashes in 10 min → give up, as before (mcp-proxy exits and Docker restarts the container) |
+
+`MCP_SUPERVISE=true` wraps every server, using the env defaults. Per server, `"supervise": {…}` overrides them, and `"supervise": false` opts that server out. mcp-proxy itself ignores the key. See [data/mcp/servers.json.example](data/mcp/servers.json.example). The entrypoint writes a wrapped copy of the config to `/tmp`. Your file is never modified.
+
+**Choosing limits:** run for a day with `MCP_SUPERVISE=true` and no limits. Look at the hourly `rss` lines (`docker logs proxy-mcp | grep rss`) and set `maxRss` to about 2–3× the normal value. Then add `hardRss` as an emergency limit, plus `mem_limit` in compose as a final backstop for the whole container.
+
+**Control socket:** each supervised server listens on `/run/mcp-supervise/<name>.sock` (one JSON line per command: `status`, `log`, `restart`, `stop`, `start`). For example:
+
+```sh
+docker exec proxy-mcp python3 -c "import socket,sys;s=socket.socket(socket.AF_UNIX);s.connect('/run/mcp-supervise/fetch.sock');s.sendall(b'{\"cmd\":\"status\"}\n');print(s.makefile().readline())"
+```
+
+**What is lost on a restart:** state kept inside the server, such as resource subscriptions. That's fine for the usual stateless tool servers. Requests that are not in flight are never affected.
+
 ## Environment variables
 
 | Variable | Default | Effect |
@@ -72,7 +99,7 @@ From 0.13.3 on, mcp-proxy has DNS-rebinding protection. It accepts only loopback
 
 ## Automation
 
-- **ci** (PRs, and before every publish): builds both images and runs the smoke test on each, plus shellcheck.
+- **ci** (PRs, and before every publish): builds both images and runs the smoke test and the mcp-supervise end-to-end test ([tests/supervise-test.py](tests/supervise-test.py)) on each, plus shellcheck.
 - **release** (push to `main`, weekly, manual): runs CI, then publishes `:latest`, `:<version>` and `:next`.
 - **Renovate** ([renovate.json](renovate.json), shared preset `shuricksumy/renovate-config`) owns version updates.
   - mcp-proxy and `mcp` are updated together in one PR. Patch and minor updates merge automatically once CI passes.

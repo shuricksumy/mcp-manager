@@ -35,6 +35,21 @@ MCP_PROXY_LOG_LEVEL="${MCP_PROXY_LOG_LEVEL:-}"
 MCP_PROXY_DEBUG="${MCP_PROXY_DEBUG:-false}"
 MCP_PROXY_EXTRA_ARGS="${MCP_PROXY_EXTRA_ARGS:-}"
 
+# Per-server supervision (mcp-supervise): wrap the servers that opted in (all
+# of them with MCP_SUPERVISE=true, or those with a "supervise" key) into a
+# generated copy of the config. The original file is never modified.
+export MCP_SUPERVISE_DIR="${MCP_SUPERVISE_DIR:-/run/mcp-supervise}"  # control sockets
+if [ -f "$MCP_PROXY_CONFIG" ] && command -v mcp-supervise > /dev/null 2>&1; then
+    supervised=/tmp/mcp-proxy-servers.supervised.json
+    rc=0
+    mcp-supervise wrap-config "$MCP_PROXY_CONFIG" "$supervised" || rc=$?
+    case "$rc" in
+        0) MCP_PROXY_CONFIG="$supervised" ;;
+        2) ;; # nothing to supervise: use the config as is
+        *) exit 1 ;;
+    esac
+fi
+
 set -- mcp-proxy \
     --host "$MCP_PROXY_HOST" \
     --port "$MCP_PROXY_PORT" \

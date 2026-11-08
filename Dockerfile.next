@@ -51,7 +51,8 @@ RUN set -e; \
     cat /etc/mcp-proxy.versions
 
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY mcp-supervise.py /usr/local/bin/mcp-supervise
+RUN chmod +x /entrypoint.sh /usr/local/bin/mcp-supervise
 
 EXPOSE 8000
 ENTRYPOINT ["/entrypoint.sh"]

@@ -19,5 +19,13 @@ services:
       MCP_PROXY_LOG_LEVEL: ${MCP_PROXY_LOG_LEVEL:-}
       MCP_PROXY_DEBUG: ${MCP_PROXY_DEBUG:-false}
       MCP_PROXY_EXTRA_ARGS: ${MCP_PROXY_EXTRA_ARGS:-}
+      MCP_SUPERVISE: ${MCP_SUPERVISE:-false}
+      MCP_SUPERVISE_MAX_RSS: ${MCP_SUPERVISE_MAX_RSS:-}
+      MCP_SUPERVISE_HARD_RSS: ${MCP_SUPERVISE_HARD_RSS:-}
+      MCP_SUPERVISE_MAX_AGE: ${MCP_SUPERVISE_MAX_AGE:-}
+      MCP_SUPERVISE_IDLE_STOP: ${MCP_SUPERVISE_IDLE_STOP:-}
+      MCP_SUPERVISE_LOG_INTERVAL: ${MCP_SUPERVISE_LOG_INTERVAL:-}
+    # Optional backstop for the whole container (all servers + proxy):
+    # mem_limit: 4g
     volumes:
       - ${MCP_CONFIG_DIR:-./data/mcp}:/mcp
