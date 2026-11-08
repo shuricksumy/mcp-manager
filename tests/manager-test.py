@@ -138,6 +138,9 @@ try:
     check("POST without X-MCP-Manager -> 403", http("POST", "/api/proxy/restart", header=False)[0] == 403)
     status, page = http("GET", "/")
     check("admin page served", status == 200 and "MCP Manager" in page)
+    with urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{mport}/", headers={"Authorization": AUTH})) as r:
+        check("iframes blocked by default (X-Frame-Options DENY, frame-ancestors 'none')",
+              r.headers.get("X-Frame-Options") == "DENY" and "frame-ancestors 'none'" in r.headers.get("Content-Security-Policy", ""))
 
     # import: one file per server, secrets separate and masked
     d = os.path.join(cfg, "servers.d")

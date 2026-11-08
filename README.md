@@ -152,6 +152,10 @@ The login is user `admin` with `MCP_MANAGER_PASSWORD`. If that is unset, a passw
 > [!WARNING]
 > The admin page can run any command inside the container, so treat it like a root shell. Publish port 8015 only on your LAN or VPN (or don't publish it at all and use an SSH tunnel), and use a strong password. The API rejects requests without credentials (`401`), and rejects writes without its `X-MCP-Manager` header (`403`), which blocks cross-site requests.
 
+**Showing the page in an iframe** (a Home Assistant *iframe panel*, a dashboard such as Homepage or Heimdall):
+- **Allow the embedding site:** set `MCP_MANAGER_FRAME_ANCESTORS` to the address of the page that embeds it, exactly as your browser shows it, e.g. `http://192.168.1.10:8123`. By default no site may embed it, because a page with Stop/Delete buttons in someone else's frame invites clickjacking, so only list sites you trust. `*` allows any site.
+- **HTTPS:** if the embedding site uses `https://`, the admin page must be served over `https://` too, behind a reverse proxy. Browsers block `http://` frames inside `https://` pages.
+
 The MCP endpoints themselves (port 8005) have **no authentication**. That's how mcp-proxy works in server mode. Keep them on a trusted network, or put an authenticating reverse proxy in front.
 
 ## Memory and supervision
@@ -205,6 +209,7 @@ With `MCP_MANAGER=false` (the default in compose), the container runs plain mcp-
 | `MCP_MANAGER_PASSWORD` | *(generated)* | Admin password (user `admin`) |
 | `MCP_MANAGER_PORT` | `8001` | Admin page port inside the container |
 | `MCP_MANAGER_PUBLISHED_PORT` | `8015` | Host port for the admin page (compose only) |
+| `MCP_MANAGER_FRAME_ANCESTORS` | *(nobody)* | Sites allowed to show the admin page in an **iframe**, space-separated, e.g. `http://192.168.1.10:8123 https://ha.example.com` (see below) |
 | **Supervision defaults** | | |
 | `MCP_SUPERVISE` | `false` | Supervise every server (always on with `MCP_MANAGER=true`) |
 | `MCP_SUPERVISE_MAX_RSS` / `_HARD_RSS` / `_MAX_AGE` / `_IDLE_STOP` / `_LOG_INTERVAL` | *(none)* | Defaults for the limits above |

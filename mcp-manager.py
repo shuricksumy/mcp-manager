@@ -104,6 +104,25 @@ def read_int(path: str) -> int | None:
         return None
 
 
+def frame_headers(value: str) -> list[str]:
+    """Who may show the admin page in an iframe (clickjacking protection).
+
+    Empty (default): nobody - X-Frame-Options: DENY.
+    Otherwise a space/comma separated list of CSP frame-ancestors sources,
+    e.g. "https://ha.example.com http://192.168.1.10:8123", "'self'" or "*".
+    """
+    sources = [s for s in re.split(r"[\s,]+", value.strip()) if s]
+    if not sources:
+        return ["X-Frame-Options: DENY", "Content-Security-Policy: frame-ancestors 'none'"]
+    for src in sources:
+        if src in ("*", "'self'", "'none'"):
+            continue
+        if not re.fullmatch(r"(https?://)?(\*\.)?[A-Za-z0-9.-]+(:(\d{1,5}|\*))?|https?:", src):
+            raise SystemExit(f"mcp-manager: MCP_MANAGER_FRAME_ANCESTORS: invalid source {src!r}")
+    log(f"admin page may be embedded in iframes by: {' '.join(sources)}")
+    return [f"Content-Security-Policy: frame-ancestors {' '.join(sources)}"]
+
+
 # --- server definitions ---------------------------------------------------------
 
 
@@ -230,6 +249,7 @@ class Manager:
         self.proxy_argv = args.proxy
         self.port = args.port
         self.public_proxy_port = os.environ.get("MCP_PROXY_PUBLISHED_PORT", "").strip()
+        self.frame_headers = frame_headers(os.environ.get("MCP_MANAGER_FRAME_ANCESTORS", ""))
         self.defaults = {
             k: os.environ[v].strip() for k, v in sup.ENV.items() if os.environ.get(v, "").strip()
         }
@@ -718,7 +738,7 @@ class Manager:
                   500: "Internal Server Error", 502: "Bad Gateway"}.get(status, "OK")
         head = [f"HTTP/1.1 {status} {reason}", f"Content-Type: {ctype}", f"Content-Length: {len(payload)}",
                 "Connection: close", "Cache-Control: no-store", "X-Content-Type-Options: nosniff",
-                "X-Frame-Options: DENY", "Referrer-Policy: no-referrer"]
+                *self.frame_headers, "Referrer-Policy: no-referrer"]
         if status == 401:
             head.append('WWW-Authenticate: Basic realm="mcp-manager", charset="UTF-8"')
         try:
