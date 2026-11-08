@@ -130,7 +130,7 @@ data/mcp/
   "description": "Fetch web pages as markdown",
   "enabled": true,
   "command": "uvx",
-  "args": ["--with", "mcp<2.0.0", "mcp-server-fetch"],
+  "args": ["mcp-server-fetch"],
   "env": {},
   "supervise": { "maxRss": "400M", "hardRss": "1G" }
 }
@@ -215,7 +215,9 @@ Built by CI for `linux/amd64` and `linux/arm64` and published to GHCR:
 
 Both images fail their build if mcp-proxy can't be imported, so a broken combination never gets published.
 
-**mcp 2.x:** mcp-proxy (0.14.0, and 0.15.0 on its `main` branch) still requires `mcp<2`, because mcp 2.0 removed `request_ctx`, which mcp-proxy uses. Every week the [mcp2-probe](.github/workflows/mcp2-probe.yml) workflow builds `:next` with `MCP_SPEC=mcp>=2`, and opens an issue the first time that works. Your servers are independent of this: each `uvx` server runs in its own environment, which is why the examples pin `--with mcp<2.0.0` per server.
+**mcp 2.x:** two separate things have an mcp version.
+- **Your servers can already use mcp 2.** Each `uvx` server installs its own `mcp` version, independent of the image, and talks to mcp-proxy over the MCP protocol. mcp 2 servers still support the protocol versions mcp-proxy speaks (up to `2025-11-25`). For example, `mcp-server-fetch` and `frigate-mcp` resolve to mcp 2.3 and work behind the stable image (verified by listing their tools and making a real `fetch` call). Older guides add `--with mcp<2.0.0` to each server; you don't need that. Add it back only for a server that fails with mcp 2.
+- **mcp-proxy itself is still on mcp 1.x.** mcp-proxy 0.14.0 (and 0.15.0 on its `main` branch) requires `mcp<2`, because mcp 2 redesigned the server API it is built on. Until it supports mcp 2, the newest protocol version (`2026-07-28`) isn't available through the proxy. Every week the [mcp2-probe](.github/workflows/mcp2-probe.yml) workflow builds `:next` with `MCP_SPEC=mcp>=2`, and opens an issue the first time that works.
 
 ## Without the admin page
 

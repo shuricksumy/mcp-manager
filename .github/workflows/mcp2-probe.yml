@@ -46,7 +46,7 @@ jobs:
             if [ -z "$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[].number')" ]; then
               gh issue create --title "$title" --body "The weekly probe built Dockerfile.next with \`MCP_SPEC=mcp>=2\` and the smoke test passed: \`${versions}\`.
 
-          Next steps: set \`MCP_SPEC=mcp>=2\` for the :next image (or wait for mcp-proxy to lift its own \`mcp<2\` cap), test it, then drop \`--with mcp<2.0.0\` from servers that support mcp 2.
+          Next steps: set \`MCP_SPEC=mcp>=2\` for the :next image (or wait for mcp-proxy to lift its own \`mcp<2\` cap), test it, then move the stable image (\`Dockerfile\`, \`MCP_VERSION\`) to mcp 2.
 
           Run: ${RUN_URL}"
             fi
