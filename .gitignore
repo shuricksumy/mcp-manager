@@ -2,8 +2,10 @@
 .env
 .env.*
 !.env.example
+!.env.next.example
 !homelab/.env.homelab.example
 data/mcp/servers.json
+data/mcp-next/servers.json
 data/finance/
 *.pem
 *.key

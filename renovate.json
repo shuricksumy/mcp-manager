@@ -1,0 +1,81 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "github>shuricksumy/renovate-config"
+  ],
+  "enabledManagers": [
+    "custom.regex",
+    "dockerfile",
+    "docker-compose",
+    "github-actions"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Stable image: pinned mcp-proxy version (ARG in Dockerfile)",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG MCP_PROXY_VERSION=(?<currentValue>\\S+)"
+      ],
+      "datasourceTemplate": "pypi",
+      "depNameTemplate": "mcp-proxy"
+    },
+    {
+      "customType": "regex",
+      "description": "Stable image: pinned mcp SDK version (ARG in Dockerfile)",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG MCP_VERSION=(?<currentValue>\\S+)"
+      ],
+      "datasourceTemplate": "pypi",
+      "depNameTemplate": "mcp"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "mcp-proxy and the mcp SDK move together, so the pinned pair always satisfies mcp-proxy's own mcp requirement. CI (build + smoke test) gates the merge.",
+      "matchDatasources": [
+        "pypi"
+      ],
+      "matchPackageNames": [
+        "mcp-proxy",
+        "mcp"
+      ],
+      "groupName": "mcp-proxy",
+      "commitMessageTopic": "mcp-proxy",
+      "automerge": true,
+      "matchUpdateTypes": [
+        "patch",
+        "minor"
+      ]
+    },
+    {
+      "description": "No mcp 2.x for the stable image: mcp-proxy (<= 0.15.0) caps mcp<2 and crashes on import with mcp 2. The :next image and the mcp2-probe workflow track that instead.",
+      "matchDatasources": [
+        "pypi"
+      ],
+      "matchPackageNames": [
+        "mcp"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "uv only installs mcp-proxy at build time; CI catches a broken build",
+      "matchPackageNames": [
+        "ghcr.io/astral-sh/uv"
+      ],
+      "matchUpdateTypes": [
+        "patch",
+        "minor"
+      ],
+      "automerge": true
+    }
+  ]
+}

@@ -91,6 +91,11 @@ if [ ! -f "$MCP_PROXY_CONFIG" ]; then
     echo "entrypoint: WARNING: named server config '$MCP_PROXY_CONFIG' not found" >&2
 fi
 
+# Versions recorded at build time by the Dockerfile smoke test.
+if [ -f /etc/mcp-proxy.versions ]; then
+    echo "entrypoint: $(cat /etc/mcp-proxy.versions)"
+fi
+
 # Log the command. Only flags are printed, never environment values, so
 # secrets passed via env (API_ACCESS_TOKEN, server tokens) are not logged.
 printf 'entrypoint: exec'

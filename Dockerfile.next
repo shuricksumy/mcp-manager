@@ -1,0 +1,57 @@
+# "Next" image: always the newest mcp-proxy, ready for mcp >= 2.
+#
+# The stable image (Dockerfile) pins everything. This image tracks the latest
+# releases instead and lets you force a newer `mcp` SDK than mcp-proxy
+# declares, so you can try mcp 2.x as soon as mcp-proxy supports it.
+# A smoke test at the end makes the build FAIL if the result cannot start,
+# so a broken combination never replaces a running container.
+#
+# Build args (all optional):
+#   MCP_PROXY_SPEC  what to install: "mcp-proxy" (newest on PyPI, default),
+#                   "mcp-proxy==0.15.0", or
+#                   "git+https://github.com/sparfenyuk/mcp-proxy@main"
+#   MCP_SPEC        forced mcp SDK version, e.g. "mcp>=2". Applied as a uv
+#                   override, so it wins over mcp-proxy's own "mcp<2" cap.
+#                   Empty (default) = use whatever mcp-proxy allows.
+#   UV_VERSION      uv image tag (default: latest)
+#   PYTHON_VERSION  python slim tag (default: 3.12)
+ARG PYTHON_VERSION=3.12
+ARG UV_VERSION=latest
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
+FROM python:${PYTHON_VERSION}-slim
+
+ARG MCP_PROXY_SPEC=mcp-proxy
+ARG MCP_SPEC=
+
+# git/curl/nodejs/npm are needed by the stdio servers launched via uvx / npx
+# (and git also for a git+https MCP_PROXY_SPEC).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git curl ca-certificates nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=uv /uv /uvx /bin/
+
+RUN set -e; \
+    if [ -n "$MCP_SPEC" ]; then \
+        printf '%s\n' "$MCP_SPEC" > /tmp/overrides.txt; \
+        set -- --overrides /tmp/overrides.txt; \
+    fi; \
+    uv tool install "$MCP_PROXY_SPEC" "$@"; \
+    rm -f /tmp/overrides.txt
+ENV PATH="/root/.local/bin:${PATH}"
+
+# Smoke test: import mcp-proxy (fails on e.g. mcp 2.x without support) and
+# record the resolved versions; entrypoint.sh prints them at startup.
+RUN set -e; \
+    mcp-proxy --help > /dev/null; \
+    /root/.local/share/uv/tools/mcp-proxy/bin/python -c \
+      "import importlib.metadata as m; print('mcp-proxy', m.version('mcp-proxy'), '| mcp', m.version('mcp'))" \
+      > /etc/mcp-proxy.versions; \
+    cat /etc/mcp-proxy.versions
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 8000
+ENTRYPOINT ["/entrypoint.sh"]

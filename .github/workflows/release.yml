@@ -1,0 +1,72 @@
+name: release
+# Publishes ghcr.io/<owner>/mcp-proxy-stack:
+#   :latest, :<mcp-proxy version>  stable image (Dockerfile, pinned versions)
+#   :next                          newest mcp-proxy (Dockerfile.next), rebuilt weekly
+on:
+  # Only what is merged into main is published.
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 4 * * 1" # weekly: base-image / OS security patches, and a fresh :next
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  ci: # the full CI on exactly the commit that is published
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: publish (${{ matrix.variant }})
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # GHCR
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: stable
+            dockerfile: Dockerfile
+          - variant: next
+            dockerfile: Dockerfile.next
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: tags
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          if [ "$VARIANT" = stable ]; then
+            version="$(sed -n 's/^ARG MCP_PROXY_VERSION=//p' Dockerfile)"
+            [ -n "$version" ] || { echo "MCP_PROXY_VERSION not found in Dockerfile"; exit 1; }
+            tags="${image}:latest,${image}:${version}"
+          else
+            tags="${image}:next"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+        env:
+          VARIANT: ${{ matrix.variant }}
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          no-cache: true
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ steps.tags.outputs.tags }}

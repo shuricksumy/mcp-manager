@@ -1,0 +1,16 @@
+# Dependabot opens PRs only for **security** fixes; Renovate (renovate.json) owns version updates.
+# open-pull-requests-limit: 0 switches version updates off while security updates keep working.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /
+    schedule: {interval: weekly}
+    open-pull-requests-limit: 0
+    cooldown:
+      default-days: 7 # versions only; security updates are never delayed
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}
+    open-pull-requests-limit: 0
+    cooldown:
+      default-days: 7 # versions only; security updates are never delayed

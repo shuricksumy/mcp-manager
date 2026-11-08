@@ -1,0 +1,36 @@
+name: ghcr-cleanup
+# Removes what piles up in ghcr.io/<owner>/mcp-proxy-stack. release.yml re-points
+# :latest and :next on every push to main and on the weekly rebuild; the image a
+# tag pointed to before then remains as an untagged multi-arch set, plus its
+# provenance / SBOM attestations.
+#
+# Never deleted: anything tagged (:latest, :next, :<mcp-proxy version> - the
+# version tags are what you pin or roll back to). Deleted: untagged images no
+# tag still uses, and attestations whose image no longer exists.
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Only list what would be deleted
+        type: boolean
+        default: false
+  schedule:
+    - cron: "0 5 1 * *" # monthly
+
+permissions: {}
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write # delete package versions
+    steps:
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          owner: ${{ github.repository_owner }}
+          package: mcp-proxy-stack
+          delete-untagged: true
+          delete-orphaned-images: true
+          dry-run: ${{ inputs.dry-run == true }} # schedule: no inputs -> a real run
+          validate: true
+          log-level: info
