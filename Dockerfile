@@ -1,4 +1,4 @@
-FROM python:3.12-slim@sha256:37fc60d303cb9294d3718b5b48998a0210bb1c73611c1399ef5eb7964c0536e5
+FROM python:3.12-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b
 
 # Both versions are updated by Renovate (renovate.json, custom regex managers),
 # together in one PR so they always satisfy mcp-proxy's own mcp requirement.
